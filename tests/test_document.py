@@ -14,38 +14,15 @@ from vectorworks_plugin_rebar_single.document import (
 def _valid() -> Dict[str, Any]:
     return {
         'version': DOCUMENT_VERSION,
-        'solid': {
-            'diameter': 14.0,
-            'path': [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0]],
-        },
+        'path': [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0]],
+        'tube_diameter': 14.0,
         'plan_lines': [{'start': [0.0, 0.0], 'end': [1000.0, 0.0]}],
-        'cut_marks': [
+        'symbol_profiles': [
+            {'kind': 'disk', 'center': [0.0, 0.0], 'radius': 26.0},
+            {'kind': 'ring', 'center': [0.0, 0.0], 'outer': 26.0, 'inner': 20.0},
             {
-                'target': 'front_back',
-                'primitives': [
-                    {
-                        'kind': 'circle',
-                        'center': [0.0, 0.0],
-                        'radius': 26.0,
-                        'filled': False,
-                    },
-                    {
-                        'kind': 'line',
-                        'start': [-18.0, -18.0],
-                        'end': [18.0, 18.0],
-                    },
-                ],
-            },
-            {
-                'target': 'left_right',
-                'primitives': [
-                    {
-                        'kind': 'circle',
-                        'center': [0.0, 0.0],
-                        'radius': 26.0,
-                        'filled': True,
-                    }
-                ],
+                'kind': 'polygon',
+                'points': [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]],
             },
         ],
     }
@@ -61,31 +38,25 @@ class TestValidateDocument:
 
     def test_wrong_version(self) -> None:
         doc = _valid()
-        doc['version'] = 99
+        doc['version'] = 1
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_solid_missing(self) -> None:
+    def test_short_path(self) -> None:
         doc = _valid()
-        del doc['solid']
+        doc['path'] = [[0.0, 0.0, 0.0]]
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_solid_bad_diameter(self) -> None:
+    def test_bad_path_vertex(self) -> None:
         doc = _valid()
-        doc['solid']['diameter'] = -1.0
+        doc['path'] = [[0.0, 0.0], [1.0, 1.0]]
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_solid_short_path(self) -> None:
+    def test_bad_tube_diameter(self) -> None:
         doc = _valid()
-        doc['solid']['path'] = [[0.0, 0.0, 0.0]]
-        with pytest.raises(ValueError):
-            validate_document(doc)
-
-    def test_solid_bad_vertex(self) -> None:
-        doc = _valid()
-        doc['solid']['path'] = [[0.0, 0.0], [1.0, 1.0]]
+        doc['tube_diameter'] = -1.0
         with pytest.raises(ValueError):
             validate_document(doc)
 
@@ -95,38 +66,38 @@ class TestValidateDocument:
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_cut_mark_bad_target(self) -> None:
+    def test_profiles_not_list(self) -> None:
         doc = _valid()
-        doc['cut_marks'][0]['target'] = 'top'
+        doc['symbol_profiles'] = {}
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_cut_mark_empty_primitives(self) -> None:
+    def test_disk_bad_radius(self) -> None:
         doc = _valid()
-        doc['cut_marks'][0]['primitives'] = []
+        doc['symbol_profiles'][0]['radius'] = 0
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_primitive_bad_kind(self) -> None:
+    def test_ring_inner_ge_outer(self) -> None:
         doc = _valid()
-        doc['cut_marks'][0]['primitives'][0]['kind'] = 'rect'
+        doc['symbol_profiles'][1]['inner'] = 30.0
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_circle_bad_radius(self) -> None:
+    def test_polygon_too_few_points(self) -> None:
         doc = _valid()
-        doc['cut_marks'][1]['primitives'][0]['radius'] = 0
+        doc['symbol_profiles'][2]['points'] = [[0.0, 0.0], [1.0, 1.0]]
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_circle_missing_filled(self) -> None:
+    def test_profile_bad_kind(self) -> None:
         doc = _valid()
-        del doc['cut_marks'][1]['primitives'][0]['filled']
+        doc['symbol_profiles'][0]['kind'] = 'star'
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_line_bad_point(self) -> None:
+    def test_empty_profiles_ok(self) -> None:
+        # 記号なし(空リスト)は許容する
         doc = _valid()
-        doc['cut_marks'][0]['primitives'][1]['start'] = [1.0]
-        with pytest.raises(ValueError):
-            validate_document(doc)
+        doc['symbol_profiles'] = []
+        assert validate_document(doc) is not None
