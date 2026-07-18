@@ -58,10 +58,10 @@ class TestBuildDocument:
             p['kind'] for p in lr['primitives']
         ]
 
-    def test_symbol_placed_at_projected_centroid(self) -> None:
-        # パス重心 (500,0,0) を各断面の紙面へ投影:
-        # front_back=(X,Z)=(500,0)、left_right=(Y,Z)=(0,0)。
-        # D22=○ の円の中心がそこに来る。
+    def test_symbol_placed_relative_to_first_vertex(self) -> None:
+        # 記号は第 1 頂点を基準とした相対位置(重心 − 第 1 頂点)を投影して置く。
+        # path=[(0,0,0),(1000,0,0)]: 第1頂点(0,0,0)・重心(500,0,0)
+        # → 相対(500,0,0) → front_back=(X,Z)=(500,0)、left_right=(Y,Z)=(0,0)。
         doc = build_document(_params(bar='D22'))
         fb = next(m for m in doc['cut_marks'] if m['target'] == 'front_back')
         lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
@@ -70,10 +70,11 @@ class TestBuildDocument:
         assert fb_circle['center'] == [500.0, 0.0]
         assert lr_circle['center'] == [0.0, 0.0]
 
-    def test_symbol_tracks_offset_path(self) -> None:
-        # パスが原点から離れていても記号は断面位置に付く(原点固定でない)。
-        # centroid=(100,700,-50) → front_back=(X,Z)=(100,-50)、
-        # left_right=(Y,Z)=(700,-50)。
+    def test_symbol_position_is_relative_not_absolute(self) -> None:
+        # パスが原点から遠くても、記号は第 1 頂点基準の小さな相対座標に置く
+        # (絶対座標だと第 1 頂点ぶん二重にずれて本体から大きく離れる)。
+        # 第1頂点(100,200,-50)・重心(100,700,-50) → 相対(0,500,0)
+        # → front_back=(X,Z)=(0,0)、left_right=(Y,Z)=(500,0)。
         doc = build_document(
             _params(bar='D22', path=[[100.0, 200.0, -50.0], [100.0, 1200.0, -50.0]])
         )
@@ -81,8 +82,19 @@ class TestBuildDocument:
         lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
         fb_circle = next(p for p in fb['primitives'] if p['kind'] != KIND_LINE)
         lr_circle = next(p for p in lr['primitives'] if p['kind'] != KIND_LINE)
-        assert fb_circle['center'] == [100.0, -50.0]
-        assert lr_circle['center'] == [700.0, -50.0]
+        assert fb_circle['center'] == [0.0, 0.0]
+        assert lr_circle['center'] == [500.0, 0.0]
+
+    def test_axis_aligned_bar_end_on_symbol_on_axis(self) -> None:
+        # 軸に沿った直線鉄筋の端面(left_right)記号は軸上(u=0)に来る:
+        # X 軸に沿う鉄筋は Y が一定 → left_right の u=Y 相対=0。
+        doc = build_document(
+            _params(bar='D10', path=[[300.0, 400.0, 500.0], [1300.0, 400.0, 500.0]])
+        )
+        lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
+        lr_dot = next(p for p in lr['primitives'] if p['kind'] != KIND_LINE)
+        # 端面記号(●)は Y,Z が第1頂点と同じ → 相対 (0,0)
+        assert lr_dot['center'] == [0.0, 0.0]
 
     def test_d13_symbol_is_cross(self) -> None:
         # D13 は × (線 2 本のみ)
