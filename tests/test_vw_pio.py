@@ -35,7 +35,7 @@ def _load(vs_mock: MagicMock) -> Any:
         return vw_pio
 
 
-FIELDS = {'Bar': 'D13', 'MarkScale': '4.0'}
+FIELDS = {'Bar': 'D13', 'MarkScale': '4.0', 'SymbolClass': '鉄筋-断面記号'}
 
 PATH = [(0.0, 0.0, 0.0), (2000.0, 0.0, 0.0), (2000.0, 0.0, -500.0)]
 
@@ -51,6 +51,7 @@ class TestReadPioInput:
         assert handle == 'PIO_HANDLE'
         assert params['bar'] == 'D13'
         assert params['mark_scale'] == 4.0
+        assert params['symbol_class'] == '鉄筋-断面記号'
         assert params['path'] == [
             [0.0, 0.0, 0.0],
             [2000.0, 0.0, 0.0],
