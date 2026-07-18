@@ -165,6 +165,83 @@ class TestBuildDocument:
         assert len(doc['plan_lines']) == 1
         assert len(doc['path']) == 2
 
+    def test_collinear_points_merged_into_single_segment(self) -> None:
+        # 直線上に並ぶ中間頂点は 1 区間へマージ(平面線も 1 本になる)
+        doc = build_document(
+            _params(
+                path=[
+                    [0.0, 0.0, 0.0],
+                    [500.0, 0.0, 0.0],
+                    [1000.0, 0.0, 0.0],
+                ]
+            )
+        )
+        assert doc['path'] == [[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0]]
+        assert doc['plan_lines'] == [{'start': [0.0, 0.0], 'end': [1000.0, 0.0]}]
+
+    def test_collinear_run_in_3d_merged(self) -> None:
+        # 斜め方向の一直線に並ぶ複数頂点も 1 区間へ集約する
+        doc = build_document(
+            _params(
+                path=[
+                    [0.0, 0.0, 0.0],
+                    [100.0, 100.0, -100.0],
+                    [200.0, 200.0, -200.0],
+                    [300.0, 300.0, -300.0],
+                ]
+            )
+        )
+        assert doc['path'] == [[0.0, 0.0, 0.0], [300.0, 300.0, -300.0]]
+
+    def test_bend_is_preserved(self) -> None:
+        # 直線でない折れ(角)は残す
+        doc = build_document(
+            _params(
+                path=[
+                    [0.0, 0.0, 0.0],
+                    [500.0, 0.0, 0.0],
+                    [500.0, 500.0, 0.0],
+                ]
+            )
+        )
+        assert doc['path'] == [
+            [0.0, 0.0, 0.0],
+            [500.0, 0.0, 0.0],
+            [500.0, 500.0, 0.0],
+        ]
+
+    def test_foldback_is_preserved(self) -> None:
+        # 一直線上でも反対向き(折り返し)の頂点はマージしない
+        doc = build_document(
+            _params(
+                path=[
+                    [0.0, 0.0, 0.0],
+                    [1000.0, 0.0, 0.0],
+                    [400.0, 0.0, 0.0],
+                ]
+            )
+        )
+        assert doc['path'] == [
+            [0.0, 0.0, 0.0],
+            [1000.0, 0.0, 0.0],
+            [400.0, 0.0, 0.0],
+        ]
+
+    def test_collinear_merge_keeps_cut_symbol_position(self) -> None:
+        # 中間頂点をマージしても切断高さを横切る XY 位置は変わらない
+        doc = build_document(
+            _params(
+                path=[
+                    [0.0, 0.0, 0.0],
+                    [500.0, 0.0, -200.0],
+                    [1000.0, 0.0, -400.0],
+                ],
+                cut_height=-200.0,
+            )
+        )
+        assert doc['path'] == [[0.0, 0.0, 0.0], [1000.0, 0.0, -400.0]]
+        assert doc['plan_symbol_centers'] == [[500.0, 0.0]]
+
     def test_too_few_points_raises(self) -> None:
         with pytest.raises(SpecError):
             build_document(_params(path=[[0.0, 0.0, 0.0]]))

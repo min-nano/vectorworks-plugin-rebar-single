@@ -75,7 +75,7 @@ pyproject.toml           # パッケージメタデータ
 `vectorworks_plugin_rebar_single.run()` は PIO のリセットのたびに以下を行う:
 
 1. **PIO コンテキスト読取（`vw/pio.py`）** — `vs.GetCustomObjectInfo()` で PIO ハンドルを取得し、`vs.GetRField` でパラメータ（`Bar` / `MarkScale` / `SymbolClass`）を、`vs.GetCustomObjectPath` + `vs.GetPolyPt3D`（**0 始まり**インデックス）でパス頂点を読む。数値フィールドは単位付き文字列を許容し、解釈できないフィールドはキーを省いて既定値に委ねる。
-2. **計算（フェーズ1）** — `rebar.build_document(params)` で JSON 命令セットを組み立てる。呼び径の形式不正・パス不足は `SpecError`（ユーザー向け日本語メッセージ）。
+2. **計算（フェーズ1）** — `rebar.build_document(params)` で JSON 命令セットを組み立てる。パス頂点は連続重複点の除去（`_clean_path`）に加え、**直線上に並ぶ連続区間を 1 区間へマージ**（`_merge_collinear`）してから使う。1 本の鉄筋は断面形状（呼び径）がパス全体で同一なので、地中梁のように直線上へ小刻みに頂点が並ぶパスでも冗長な中間頂点を除いて 1 つのまっすぐな区間として扱い、平面の投影線が細切れにならない（反対向きの折り返し頂点は残す）。呼び径の形式不正・パス不足は `SpecError`（ユーザー向け日本語メッセージ）。
 3. **JSON 経由の受け渡し** — `json.dumps` → `json.loads` を通し直列化可能性を保証。
 4. **描画（フェーズ2）** — `vw.execute_document(document, pio_handle, symbol_class)` が検証後、本体丸鋼（PIO クラス）→ 平面線（PIO クラス, regen）→ 断面記号ソリッド（`SymbolClass`）の順で描画する。
 5. **エラー表示** — リセットは頻繁に実行されるためモーダルダイアログは使わず、`vs.Message` でステータスバーに表示する（`SpecError` は入力の直し方が分かるメッセージ）。

@@ -39,6 +39,10 @@ DEFAULT_MARK_SCALE = 4.0
 # パスが切断高さを横切る点の判定・重複統合に使う許容誤差 (mm)。
 _EPS = 1e-6
 
+# 連続 2 区間を「一直線」とみなす角度の許容誤差 (正規化した外積 = sinθ)。
+# sinθ < _STRAIGHT_SIN_EPS かつ同方向(内積 > 0)なら中間頂点を冗長として除く。
+_STRAIGHT_SIN_EPS = 1e-6
+
 
 def _float(params: Mapping[str, Any], key: str, default: float) -> float:
     value = params.get(key, default)
@@ -76,6 +80,59 @@ def _clean_path(path: Sequence[Sequence[float]]) -> List[List[float]]:
 
 def _near3(a: Sequence[float], b: Sequence[float]) -> bool:
     return math.dist(a, b) < 1e-6
+
+
+def _merge_collinear(path: Sequence[Sequence[float]]) -> List[List[float]]:
+    """一直線上に並ぶ連続区間を 1 区間へマージした頂点列を返す。
+
+    3D パスは 1 本の鉄筋の芯線であり断面形状(呼び径)はパス全体で同一。
+    連続する 3 頂点が同方向の一直線に並ぶ(中間頂点が直線上に載る)場合、
+    中間頂点は冗長なので取り除き、その区間を 1 つのまっすぐな区間として
+    扱う。地中梁のように直線上へ小刻みに頂点が並ぶパスでも、平面の投影線
+    が細切れにならず 1 本の線として出る(折り返し=反対向きの頂点は残す)。
+
+    連続重複点は ``_clean_path`` で除去済みである前提。
+    """
+    if len(path) <= 2:
+        return [[float(v[0]), float(v[1]), float(v[2])] for v in path]
+    merged: List[List[float]] = [
+        [float(path[0][0]), float(path[0][1]), float(path[0][2])]
+    ]
+    for i in range(1, len(path) - 1):
+        prev = merged[-1]
+        cur = [float(path[i][0]), float(path[i][1]), float(path[i][2])]
+        nxt = [float(path[i + 1][0]), float(path[i + 1][1]), float(path[i + 1][2])]
+        if not _is_straight(prev, cur, nxt):
+            merged.append(cur)
+    merged.append(
+        [float(path[-1][0]), float(path[-1][1]), float(path[-1][2])]
+    )
+    return merged
+
+
+def _is_straight(
+    a: Sequence[float], b: Sequence[float], c: Sequence[float]
+) -> bool:
+    """b が a→c の一直線上(同方向)に載るなら True(b は冗長)。
+
+    区間 a→b と b→c の外積の大きさ = |ab||bc|sinθ を正規化した sinθ で
+    直線性を、内積の符号で向き(折り返しでないこと)を判定する。
+    """
+    ab = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    bc = (c[0] - b[0], c[1] - b[1], c[2] - b[2])
+    ab_len = math.sqrt(ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2)
+    bc_len = math.sqrt(bc[0] ** 2 + bc[1] ** 2 + bc[2] ** 2)
+    if ab_len < _EPS or bc_len < _EPS:
+        return False
+    cross = (
+        ab[1] * bc[2] - ab[2] * bc[1],
+        ab[2] * bc[0] - ab[0] * bc[2],
+        ab[0] * bc[1] - ab[1] * bc[0],
+    )
+    cross_len = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
+    sin_theta = cross_len / (ab_len * bc_len)
+    dot = ab[0] * bc[0] + ab[1] * bc[1] + ab[2] * bc[2]
+    return dot > 0.0 and sin_theta < _STRAIGHT_SIN_EPS
 
 
 def _plan_lines(path: Sequence[Sequence[float]]) -> List[PlanLineCommand]:
@@ -166,7 +223,7 @@ def build_document(params: Mapping[str, Any]) -> Document:
         isinstance(v, (list, tuple)) and len(v) == 3 for v in raw_path
     ):
         raise SpecError('パス頂点を取得できません')
-    path = _clean_path(raw_path)
+    path = _merge_collinear(_clean_path(raw_path))
     if len(path) < 2:
         raise SpecError('鉄筋のパスには 2 点以上の頂点が必要です')
 
