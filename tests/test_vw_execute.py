@@ -22,7 +22,7 @@ def make_document() -> Dict[str, Any]:
             {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 6.0, 'filled': True},
             {'kind': 'line', 'start': [-18.0, -18.0], 'end': [18.0, 18.0]},
         ],
-        'plan_center': [500.0, 0.0],
+        'plan_symbol_centers': [[500.0, 0.0]],
     }
 
 
@@ -99,20 +99,46 @@ class TestExecuteDocument:
         starts = {c.args[0] for c in vs_mock.MoveTo.call_args_list}
         assert (-18.0, -18.0) in starts
 
-    def test_plan_symbol_drawn_at_plan_center(self) -> None:
+    def test_plan_symbol_drawn_at_center(self) -> None:
         vs_mock = _make_vs_mock()
         vw = _load(vs_mock)
 
         vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
-        # 平面 2D 記号はプロファイルを plan_center=(500,0) へ平行移動して描く。
-        # 記号の線(-18,-18) は (482,-18) になる
+        # 平面 2D 記号はプロファイルを plan_symbol_centers=(500,0) へ平行移動
+        # して描く。記号の線(-18,-18) は (482,-18) になる
         starts = {c.args[0] for c in vs_mock.MoveTo.call_args_list}
         assert (482.0, -18.0) in starts
         # 平面 2D の円(○ 輪郭・● 塗り)は Oval + SetFPat(0/1)
         assert vs_mock.SetFPat.called
         fpats = {c.args[1] for c in vs_mock.SetFPat.call_args_list}
         assert fpats == {0, 1}  # 輪郭=0・塗り=1
+
+    def test_plan_symbol_drawn_at_each_center(self) -> None:
+        vs_mock = _make_vs_mock()
+        vw = _load(vs_mock)
+
+        document = make_document()
+        # 折り返しで 2 か所を横切る場合を模擬(記号位置が 2 つ)
+        document['plan_symbol_centers'] = [[100.0, 0.0], [900.0, 0.0]]
+        vw.execute_document(document, PIO_HANDLE, SYMBOL_CLASS)
+
+        # 記号の線(-18,-18) が両方の位置へ平行移動して描かれる
+        starts = {c.args[0] for c in vs_mock.MoveTo.call_args_list}
+        assert (82.0, -18.0) in starts
+        assert (882.0, -18.0) in starts
+
+    def test_no_plan_symbol_when_no_center(self) -> None:
+        vs_mock = _make_vs_mock()
+        vw = _load(vs_mock)
+
+        document = make_document()
+        # パスが切断高さを横切らない場合は平面記号を描かない
+        document['plan_symbol_centers'] = []
+        vw.execute_document(document, PIO_HANDLE, SYMBOL_CLASS)
+
+        # 平面記号の Oval(円記号)は描かれない(SetFPat も呼ばれない)
+        assert not vs_mock.SetFPat.called
 
     def test_symbols_on_symbol_class_body_on_pio_class(self) -> None:
         vs_mock = _make_vs_mock()

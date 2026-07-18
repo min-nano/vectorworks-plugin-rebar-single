@@ -22,7 +22,7 @@ def _valid() -> Dict[str, Any]:
             {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 6.0, 'filled': True},
             {'kind': 'line', 'start': [-18.0, -18.0], 'end': [18.0, 18.0]},
         ],
-        'plan_center': [500.0, 0.0],
+        'plan_symbol_centers': [[500.0, 0.0]],
     }
 
 
@@ -100,14 +100,32 @@ class TestValidateDocument:
         doc['symbol_profiles'] = []
         assert validate_document(doc) is not None
 
-    def test_plan_center_required(self) -> None:
+    def test_plan_symbol_centers_required(self) -> None:
         doc = _valid()
-        del doc['plan_center']
+        del doc['plan_symbol_centers']
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_plan_center_bad(self) -> None:
+    def test_plan_symbol_centers_not_list(self) -> None:
         doc = _valid()
-        doc['plan_center'] = [1.0, 2.0, 3.0]
+        doc['plan_symbol_centers'] = [500.0, 0.0]
         with pytest.raises(ValueError):
             validate_document(doc)
+
+    def test_plan_symbol_centers_bad_point(self) -> None:
+        doc = _valid()
+        doc['plan_symbol_centers'] = [[1.0, 2.0, 3.0]]
+        with pytest.raises(ValueError):
+            validate_document(doc)
+
+    def test_plan_symbol_centers_empty_ok(self) -> None:
+        # パスが切断高さを横切らない場合は空(平面に記号なし)を許容する
+        doc = _valid()
+        doc['plan_symbol_centers'] = []
+        assert validate_document(doc) is not None
+
+    def test_plan_symbol_centers_multiple_ok(self) -> None:
+        # 折り返しで複数の記号位置になる場合を許容する
+        doc = _valid()
+        doc['plan_symbol_centers'] = [[100.0, 0.0], [900.0, 0.0]]
+        assert validate_document(doc) is not None
