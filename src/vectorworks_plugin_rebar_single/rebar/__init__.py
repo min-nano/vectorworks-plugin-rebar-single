@@ -95,22 +95,31 @@ def _centroid(path: Sequence[Sequence[float]]) -> Tuple[float, float, float]:
 
 
 def _cut_marks(
-    bar: BarSize, mark_scale: float, centroid: Tuple[float, float, float]
+    bar: BarSize,
+    mark_scale: float,
+    centroid: Tuple[float, float, float],
+    origin: Sequence[float],
 ) -> List[CutMarkCommand]:
     """呼び径に応じた断面表示記号を両方の断面コンポーネントへ組み立てる。
 
-    記号は原点固定ではなく、鉄筋の断面位置(パスの重心を各断面の紙面へ
-    投影した点)に置く。断面ビューポートは 3D の鉄筋(ソリッド)を実位置で
-    切断するため、記号も同じ位置に出さないと本体と食い違う(原点固定だと
-    PIO のローカル原点とパスの実位置の差だけずれる)。紙面軸は
-    front_back が u=ローカル X・v=ローカル Z、left_right が u=ローカル Y・
-    v=ローカル Z(document.py のスキーマ参照)。
+    記号は原点固定ではなく、鉄筋の断面位置に置く。ただし断面 2D
+    コンポーネントの紙面座標系の原点は **PIO のローカル座標原点=パスの
+    第 1 頂点**(``CreateCustomObjectPath`` はパスの第 1 頂点をプラグインの
+    座標空間の原点へ置く)であるため、記号は**第 1 頂点を基準とした相対位置**
+    (重心 − 第 1 頂点)を各断面の紙面へ投影して配置する。絶対座標(重心
+    そのもの)で置くと、第 1 頂点ぶんだけ二重にずれて本体から大きく離れる
+    (VW 上で観測)。
+
+    紙面軸は front_back が u=ローカル X・v=ローカル Z、left_right が
+    u=ローカル Y・v=ローカル Z(document.py のスキーマ参照)。
     """
     size = bar.nominal * mark_scale
-    cx, cy, cz = centroid
+    rx = centroid[0] - float(origin[0])
+    ry = centroid[1] - float(origin[1])
+    rz = centroid[2] - float(origin[2])
     centers = {
-        TARGET_FRONT_BACK: (cx, cz),
-        TARGET_LEFT_RIGHT: (cy, cz),
+        TARGET_FRONT_BACK: (rx, rz),
+        TARGET_LEFT_RIGHT: (ry, rz),
     }
     base = build_symbol(bar.nominal, size)
     marks: List[CutMarkCommand] = []
@@ -152,5 +161,5 @@ def build_document(params: Mapping[str, Any]) -> Document:
         'version': DOCUMENT_VERSION,
         'solid': {'diameter': bar.outer, 'path': path},
         'plan_lines': _plan_lines(path),
-        'cut_marks': _cut_marks(bar, mark_scale, _centroid(path)),
+        'cut_marks': _cut_marks(bar, mark_scale, _centroid(path), path[0]),
     }
