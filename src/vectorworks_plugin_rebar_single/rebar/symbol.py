@@ -141,5 +141,36 @@ def build_symbol(nominal: int, size: float) -> List[Primitive]:
 
     記号は中心(0, 0)を基準にした線・円のプリミティブのリスト。
     ``size`` は記号の外径(``呼び径 × MarkScale``)で、半径 ``r = size/2``。
+    紙面上の配置位置は ``translate`` で平行移動して与える。
     """
     return _builder_for(nominal)(size / 2.0)
+
+
+def translate(primitives: List[Primitive], du: float, dv: float) -> List[Primitive]:
+    """記号のプリミティブを紙面上で ``(du, dv)`` だけ平行移動した複製を返す。
+
+    断面記号は 3D の鉄筋(ソリッド)と同じ位置に出す必要があるため、記号を
+    原点ではなく鉄筋の断面位置(パスの投影位置)へ移す。原点固定だと PIO の
+    ローカル原点とパスの実位置の差だけ記号がずれる(断面ビューポートで
+    鉄筋本体と記号が食い違う)。
+    """
+    moved: List[Primitive] = []
+    for p in primitives:
+        if p['kind'] == KIND_LINE:
+            moved.append(
+                {
+                    'kind': KIND_LINE,
+                    'start': [p['start'][0] + du, p['start'][1] + dv],
+                    'end': [p['end'][0] + du, p['end'][1] + dv],
+                }
+            )
+        else:
+            moved.append(
+                {
+                    'kind': KIND_CIRCLE,
+                    'center': [p['center'][0] + du, p['center'][1] + dv],
+                    'radius': p['radius'],
+                    'filled': p['filled'],
+                }
+            )
+    return moved
