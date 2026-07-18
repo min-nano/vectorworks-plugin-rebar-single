@@ -64,9 +64,15 @@ def _near3(a: Sequence[float], b: Sequence[float]) -> bool:
 
 
 def _plan_lines(path: Sequence[Sequence[float]]) -> List[PlanLineCommand]:
-    """上から見たパスの投影図(連続頂点を結ぶ 2D 線)。"""
+    """上から見たパスの投影図(連続頂点を結ぶ 2D 線)。
+
+    XY へ投影して退化する区間(縦筋のように上から見ると点になる区間)は
+    描かない(平面には別途 2D 記号を出す)。
+    """
     lines: List[PlanLineCommand] = []
     for start, end in zip(path, path[1:]):
+        if math.hypot(end[0] - start[0], end[1] - start[1]) < 1e-6:
+            continue
         lines.append(
             {
                 'start': [start[0], start[1]],
@@ -74,6 +80,14 @@ def _plan_lines(path: Sequence[Sequence[float]]) -> List[PlanLineCommand]:
             }
         )
     return lines
+
+
+def _plan_center(path: Sequence[Sequence[float]]) -> List[float]:
+    """平面ビューの 2D 記号を描く位置(パス頂点の XY 重心)。"""
+    n = len(path)
+    cx = sum(float(v[0]) for v in path) / n
+    cy = sum(float(v[1]) for v in path) / n
+    return [cx, cy]
 
 
 def build_document(params: Mapping[str, Any]) -> Document:
@@ -109,4 +123,5 @@ def build_document(params: Mapping[str, Any]) -> Document:
         'tube_diameter': bar.outer,
         'plan_lines': _plan_lines(path),
         'symbol_profiles': profiles,
+        'plan_center': _plan_center(path),
     }

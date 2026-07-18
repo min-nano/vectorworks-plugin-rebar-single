@@ -18,13 +18,11 @@ def make_document() -> Dict[str, Any]:
         'tube_diameter': 14.0,
         'plan_lines': [{'start': [0.0, 0.0], 'end': [1000.0, 0.0]}],
         'symbol_profiles': [
-            {'kind': 'disk', 'center': [0.0, 0.0], 'radius': 26.0},
-            {'kind': 'ring', 'center': [0.0, 0.0], 'outer': 26.0, 'inner': 20.0},
-            {
-                'kind': 'polygon',
-                'points': [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]],
-            },
+            {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 26.0, 'filled': False},
+            {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 6.0, 'filled': True},
+            {'kind': 'line', 'start': [-18.0, -18.0], 'end': [18.0, 18.0]},
         ],
+        'plan_center': [500.0, 0.0],
     }
 
 
@@ -42,7 +40,6 @@ def _make_vs_mock() -> MagicMock:
     vs_mock.LNewObj.side_effect = lambda: unique('OBJ')
     vs_mock.CreateNurbsCurve.side_effect = lambda *a: unique('NURBS')
     vs_mock.CreateExtrudeAlongPath.side_effect = lambda *a: unique('SOLID')
-    vs_mock.SubtractSolid.side_effect = lambda a, b: (0, unique('RING'))
     vs_mock.GetClass.return_value = 'PIOクラス'
     return vs_mock
 
@@ -77,28 +74,45 @@ class TestExecuteDocument:
 
         vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
-        # 本体(1) + disk(1) + ring 外(1) + ring 内(1) + polygon(1) = 5 押し出し
-        assert vs_mock.CreateExtrudeAlongPath.call_count == 5
-        # 本体はポリラインへフォールバックしない
+        # 本体(1) + 記号 3 プロファイル(1 ずつ) = 4 押し出し
+        assert vs_mock.CreateExtrudeAlongPath.call_count == 4
         assert not vs_mock.Poly3D.called
 
-    def test_ring_uses_solid_subtraction(self) -> None:
+    def test_outline_circle_uses_arc_for_3d_sweep(self) -> None:
         vs_mock = _make_vs_mock()
         vw = _load(vs_mock)
 
         vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
-        # ○ リングは外側から内側を引く
-        assert vs_mock.SubtractSolid.call_count == 1
+        # 3D の輪郭円(○)は ArcByCenter 360°(押し出すと筒面=切断が輪郭線)
+        assert vs_mock.ArcByCenter.called
+        arc = vs_mock.ArcByCenter.call_args
+        assert arc.args[3] == 0.0 and arc.args[4] == 360.0
 
-    def test_polygon_profile_uses_poly(self) -> None:
+    def test_3d_line_profile_uses_moveto_at_origin(self) -> None:
         vs_mock = _make_vs_mock()
         vw = _load(vs_mock)
 
         vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
-        # 帯(×)は塗り多角形プロファイル
-        assert vs_mock.Poly.called
+        # 3D 記号の線(×)は原点中心の MoveTo/LineTo プロファイル
+        starts = {c.args[0] for c in vs_mock.MoveTo.call_args_list}
+        assert (-18.0, -18.0) in starts
+
+    def test_plan_symbol_drawn_at_plan_center(self) -> None:
+        vs_mock = _make_vs_mock()
+        vw = _load(vs_mock)
+
+        vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
+
+        # 平面 2D 記号はプロファイルを plan_center=(500,0) へ平行移動して描く。
+        # 記号の線(-18,-18) は (482,-18) になる
+        starts = {c.args[0] for c in vs_mock.MoveTo.call_args_list}
+        assert (482.0, -18.0) in starts
+        # 平面 2D の円(○ 輪郭・● 塗り)は Oval + SetFPat(0/1)
+        assert vs_mock.SetFPat.called
+        fpats = {c.args[1] for c in vs_mock.SetFPat.call_args_list}
+        assert fpats == {0, 1}  # 輪郭=0・塗り=1
 
     def test_symbols_on_symbol_class_body_on_pio_class(self) -> None:
         vs_mock = _make_vs_mock()
@@ -107,9 +121,7 @@ class TestExecuteDocument:
         vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
         classes = _class_calls(vs_mock)
-        # 本体・平面線は PIO クラス、記号ソリッドは SymbolClass
         assert 'PIOクラス' in classes
-        assert SYMBOL_CLASS in classes
         # 記号 3 プロファイル分が SymbolClass に割り当てられる
         assert classes.count(SYMBOL_CLASS) == 3
 
@@ -119,9 +131,7 @@ class TestExecuteDocument:
 
         vw.execute_document(make_document(), PIO_HANDLE, '')
 
-        classes = _class_calls(vs_mock)
-        # SymbolClass 未指定なら全て PIO クラス
-        assert set(classes) == {'PIOクラス'}
+        assert set(_class_calls(vs_mock)) == {'PIOクラス'}
 
     def test_plan_line_drawn(self) -> None:
         vs_mock = _make_vs_mock()
@@ -139,7 +149,6 @@ class TestExecuteDocument:
 
         result = vw.execute_document(make_document(), PIO_HANDLE, SYMBOL_CLASS)
 
-        # 押し出しが使えない環境では本体は 3D ポリラインで描く
         assert vs_mock.Poly3D.called
         assert result['tube'] == 1
 
