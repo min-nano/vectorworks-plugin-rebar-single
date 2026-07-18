@@ -11,10 +11,11 @@
    環境では 3D ポリライン(芯線)へフォールバックする。
 2. 平面線(plan_lines) — 上から見たパスの投影図(面内の鉄筋)。PIO 本体の
    描画クラス。
-2b. 平面 2D 記号 — 記号の断面(``plan_center`` へ平行移動)を 2D の線・円で
-   描く。縦筋(上から見ると点)は記号で示す。ハイブリッド図形は Top/Plan で
-   2D regen を表示するため、3D の端部投影(カギ状)ではなくこのクリーンな
-   記号が出る。PIO 本体の描画クラス。
+2b. 平面 2D 記号 — 記号の断面を、パスが切断高さを横切る各 XY 位置
+   (``plan_symbol_centers``)へ平行移動して 2D の線・円で描く。縦筋(上から
+   見ると点)は記号で示す。パスが折り返せば記号は複数になる。ハイブリッド
+   図形は Top/Plan で 2D regen を表示するため、3D の端部投影(カギ状)ではなく
+   このクリーンな記号が出る。PIO 本体の描画クラス。
 3. 断面記号ソリッド(symbol_profiles) — 記号の断面形状をパスに沿って
    押し出したソリッド。**別クラス**(``symbol_class``, ``SymbolClass``
    パラメータ)に割り当てる。断面ビューポートがネイティブに切断して記号
@@ -66,15 +67,10 @@ def _execute_plan_lines(
     return len(commands)
 
 
-def _execute_plan_symbol(
+def _execute_plan_symbol_at(
     profiles: List[Profile], center: List[float], class_name: str
-) -> int:
-    """平面ビューの 2D 記号を描く。
-
-    記号の断面プロファイル(原点中心)を ``center``(パスの XY 重心)へ平行
-    移動して 2D の線・円として描く。ハイブリッド図形は Top/Plan で 2D regen を
-    表示するため、3D の端部投影(カギ状)ではなくこのクリーンな記号が出る。
-    """
+) -> None:
+    """記号の断面プロファイル(原点中心)を ``center`` へ平行移動して描く。"""
     cx, cy = center[0], center[1]
     for profile in profiles:
         if profile['kind'] == KIND_LINE:
@@ -92,7 +88,21 @@ def _execute_plan_symbol(
                 profile['filled'],
                 class_name,
             )
-    return len(profiles)
+
+
+def _execute_plan_symbols(
+    profiles: List[Profile], centers: List[List[float]], class_name: str
+) -> int:
+    """平面ビューの 2D 記号を、パスが切断高さを横切る各位置へ描く。
+
+    記号の断面プロファイル(原点中心)を各 ``center`` へ平行移動して 2D の
+    線・円として描く。パスが折り返して切断面を複数回横切れば記号も複数出る。
+    ハイブリッド図形は Top/Plan で 2D regen を表示するため、3D の端部投影
+    (カギ状)ではなくこのクリーンな記号が出る。描いた記号の数を返す。
+    """
+    for center in centers:
+        _execute_plan_symbol_at(profiles, center, class_name)
+    return len(centers) * len(profiles)
 
 
 def _execute_symbol_profile(
@@ -127,9 +137,10 @@ def execute_document(
     draw_tube(validated['tube_diameter'], path, pio_class)
 
     plan_count = _execute_plan_lines(validated['plan_lines'], pio_class)
-    # 平面ビュー用の 2D 記号(投影線とともに PIO 本体クラス)
-    _execute_plan_symbol(
-        validated['symbol_profiles'], validated['plan_center'], pio_class
+    # 平面ビュー用の 2D 記号(投影線とともに PIO 本体クラス)。パスが切断高さを
+    # 横切る各位置に描く(折り返しがあれば複数)。
+    _execute_plan_symbols(
+        validated['symbol_profiles'], validated['plan_symbol_centers'], pio_class
     )
 
     symbol_class_name = symbol_class if symbol_class else pio_class

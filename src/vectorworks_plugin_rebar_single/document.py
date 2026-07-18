@@ -10,8 +10,11 @@
 1. 本体(``tube_diameter`` + ``path``): 鉄筋径(最外径)の円形断面をパスに
    沿って押し出した丸鋼のソリッド。3D ビューの鉄筋本体。
 2. 平面線(``plan_lines``): 上から見たパスの投影図(面内の鉄筋, 2D 線)。
-2b. 平面 2D 記号(``symbol_profiles`` + ``plan_center``): 呼び径の表示記号を
-    ``plan_center`` へ描いた 2D 線画。縦筋(上から見ると点)を ●/× で示す。
+2b. 平面 2D 記号(``symbol_profiles`` + ``plan_symbol_centers``): 呼び径の
+    表示記号を、パスが**指定した切断高さ**(z)を横切る XY 位置それぞれへ描いた
+    2D 線画。縦筋(上から見ると点)を ●/× で示す。パスが折り返して切断面を
+    複数回横切る場合は記号も複数になる(``plan_symbol_centers`` はその位置の
+    リスト)。切断高さでパスが横切らない場合は空(平面に記号は出ない)。
 3. 断面記号ソリッド(``symbol_profiles`` + ``path``): 呼び径に応じた表示
    記号(●/× 等、配筋標準図 KSE 2008)の**断面形状**をパスに沿って押し出した
    ソリッド。断面ビューポートはこの 3D ソリッドをネイティブに切断するため、
@@ -36,23 +39,26 @@
         # filled=false: 輪郭の円(○ 等)→ 筒面(切断=輪郭線)
         # filled=true:  塗り円(● 等)→ ソリッド(切断=塗り円)
 
-スキーマ (version 2):
+スキーマ (version 3):
 
     {
-        "version": 2,
+        "version": 3,
         "path": [[x, y, z], ...],   # 3D パス頂点(鉄筋の芯線, PIO ローカル座標 mm)
         "tube_diameter": 14.0,      # 本体丸鋼の直径(最外径, mm)
         "plan_lines": [ {"start": [x, y], "end": [x, y]} ],  # 投影図(面内の鉄筋)
         "symbol_profiles": [ <profile>, ... ],  # 記号の断面(原点中心)。3D 押し出し
                                                 # と 2D 平面記号の両方に使う
-        "plan_center": [cx, cy]     # 平面ビューの 2D 記号を描く位置(パスの XY 重心)
+        "plan_symbol_centers": [ [cx, cy], ... ]  # 平面ビューの 2D 記号を描く位置
+                                                  # (パスが切断高さを横切る XY, 複数可)
     }
 
 ``symbol_profiles`` は原点(0,0)中心の記号断面で、(1)パスに沿って押し出して
-断面ソリッド/面にする、(2)``plan_center`` へ平行移動して平面ビューの 2D 記号
-(regen)として描く、の両方に使う。平面では 3D の端部投影(カギ状)ではなく
-このクリーンな 2D 記号を出す(ハイブリッド図形は Top/Plan で 2D regen を表示
-するため)。縦筋は平面で点になるので記号で示し、退化した投影線分は描かない。
+断面ソリッド/面にする、(2)``plan_symbol_centers`` の各位置へ平行移動して平面
+ビューの 2D 記号(regen)として描く、の両方に使う。平面では 3D の端部投影
+(カギ状)ではなくこのクリーンな 2D 記号を出す(ハイブリッド図形は Top/Plan で
+2D regen を表示するため)。``plan_symbol_centers`` は、パスが**指定した切断高さ**
+(z)を横切る XY 位置のリストで、縦筋のように上から見ると点になる鉄筋を記号で
+示す。パスが折り返して切断面を複数回横切れば複数、横切らなければ空になる。
 
 スキーマを変更するときは ``DOCUMENT_VERSION`` の互換性に注意し、
 TypedDict 定義・docstring・``validate_document()`` とテストも併せて
@@ -62,7 +68,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, TypedDict
 
-DOCUMENT_VERSION = 2
+DOCUMENT_VERSION = 3
 
 # symbol_profiles の kind。
 KIND_LINE = 'line'
@@ -85,7 +91,7 @@ class Document(TypedDict):
     tube_diameter: float
     plan_lines: List[PlanLineCommand]
     symbol_profiles: List[Profile]
-    plan_center: List[float]
+    plan_symbol_centers: List[List[float]]
 
 
 def _is_number(value: Any) -> bool:
@@ -180,5 +186,9 @@ def validate_document(document: Any) -> Document:
     for index, profile in enumerate(profiles):
         _validate_profile(profile, index)
 
-    _validate_point_2d(document.get('plan_center'), 'plan_center')
+    centers = document.get('plan_symbol_centers')
+    if not isinstance(centers, list):
+        raise ValueError('plan_symbol_centers はリストである必要があります')
+    for index, center in enumerate(centers):
+        _validate_point_2d(center, f'plan_symbol_centers[{index}]')
     return document  # type: ignore[return-value]

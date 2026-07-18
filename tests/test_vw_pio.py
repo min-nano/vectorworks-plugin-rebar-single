@@ -58,6 +58,20 @@ class TestReadPioInput:
             [2000.0, 0.0, -500.0],
         ]
 
+    def test_reads_cut_height(self) -> None:
+        fields = dict(FIELDS, CutHeight='-200.0')
+        vw_pio = _load(_make_vs_mock(fields, PATH))
+        result = vw_pio.read_pio_input()
+        assert result is not None
+        assert result[1]['cut_height'] == -200.0
+
+    def test_cut_height_omitted_when_blank(self) -> None:
+        # CutHeight 未設定(空)なら key を省いて既定(z 範囲中央)に委ねる
+        vw_pio = _load(_make_vs_mock(FIELDS, PATH))
+        result = vw_pio.read_pio_input()
+        assert result is not None
+        assert 'cut_height' not in result[1]
+
     def test_number_with_unit_suffix(self) -> None:
         fields = dict(FIELDS, MarkScale='4.0倍')
         vw_pio = _load(_make_vs_mock(fields, PATH))

@@ -21,6 +21,7 @@ import vs
 PARAM_BAR = 'Bar'
 PARAM_MARK_SCALE = 'MarkScale'
 PARAM_SYMBOL_CLASS = 'SymbolClass'
+PARAM_CUT_HEIGHT = 'CutHeight'
 
 # 数値フィールドの文字列から数値部分を取り出す(単位付き "13.0mm" や
 # 桁区切りを許容する)
@@ -81,4 +82,7 @@ def read_pio_input() -> Optional[Tuple[Any, Dict[str, Any]]]:
     mark_scale = _number(field(PARAM_MARK_SCALE))
     if mark_scale is not None:
         params['mark_scale'] = mark_scale
+    cut_height = _number(field(PARAM_CUT_HEIGHT))
+    if cut_height is not None:
+        params['cut_height'] = cut_height
     return pio_handle, params
