@@ -32,7 +32,7 @@ from ..document import (
     PlanLineCommand,
 )
 from .spec import BarSize, SpecError, parse_bar
-from .symbol import build_symbol
+from .symbol import build_symbol, translate
 
 __all__ = ['build_document', 'SpecError']
 
@@ -85,15 +85,41 @@ def _plan_lines(path: Sequence[Sequence[float]]) -> List[PlanLineCommand]:
     return lines
 
 
-def _cut_marks(bar: BarSize, mark_scale: float) -> List[CutMarkCommand]:
-    """呼び径に応じた断面表示記号を両方の断面コンポーネントへ組み立てる。"""
+def _centroid(path: Sequence[Sequence[float]]) -> Tuple[float, float, float]:
+    """パス頂点の重心(ローカル座標 mm)を返す。"""
+    n = len(path)
+    sx = sum(float(v[0]) for v in path) / n
+    sy = sum(float(v[1]) for v in path) / n
+    sz = sum(float(v[2]) for v in path) / n
+    return (sx, sy, sz)
+
+
+def _cut_marks(
+    bar: BarSize, mark_scale: float, centroid: Tuple[float, float, float]
+) -> List[CutMarkCommand]:
+    """呼び径に応じた断面表示記号を両方の断面コンポーネントへ組み立てる。
+
+    記号は原点固定ではなく、鉄筋の断面位置(パスの重心を各断面の紙面へ
+    投影した点)に置く。断面ビューポートは 3D の鉄筋(ソリッド)を実位置で
+    切断するため、記号も同じ位置に出さないと本体と食い違う(原点固定だと
+    PIO のローカル原点とパスの実位置の差だけずれる)。紙面軸は
+    front_back が u=ローカル X・v=ローカル Z、left_right が u=ローカル Y・
+    v=ローカル Z(document.py のスキーマ参照)。
+    """
     size = bar.nominal * mark_scale
+    cx, cy, cz = centroid
+    centers = {
+        TARGET_FRONT_BACK: (cx, cz),
+        TARGET_LEFT_RIGHT: (cy, cz),
+    }
+    base = build_symbol(bar.nominal, size)
     marks: List[CutMarkCommand] = []
     for target in _CUT_TARGETS:
+        du, dv = centers[target]
         marks.append(
             {
                 'target': target,
-                'primitives': build_symbol(bar.nominal, size),
+                'primitives': translate(base, du, dv),
             }
         )
     return marks
@@ -126,5 +152,5 @@ def build_document(params: Mapping[str, Any]) -> Document:
         'version': DOCUMENT_VERSION,
         'solid': {'diameter': bar.outer, 'path': path},
         'plan_lines': _plan_lines(path),
-        'cut_marks': _cut_marks(bar, mark_scale),
+        'cut_marks': _cut_marks(bar, mark_scale, _centroid(path)),
     }

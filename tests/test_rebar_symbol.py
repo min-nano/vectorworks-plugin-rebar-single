@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List
 
 from vectorworks_plugin_rebar_single.document import KIND_CIRCLE, KIND_LINE, Primitive
-from vectorworks_plugin_rebar_single.rebar.symbol import build_symbol
+from vectorworks_plugin_rebar_single.rebar.symbol import build_symbol, translate
 
 
 def _circles(primitives: List[Primitive]) -> List[Primitive]:
@@ -101,8 +101,33 @@ class TestBuildSymbol:
         assert primitives  # 空でない
 
     def test_all_primitives_centered_at_origin(self) -> None:
-        # 記号は中心 (0,0) 基準に組み立てる
+        # 記号は中心 (0,0) 基準に組み立てる(配置は translate で与える)
         for nominal in (10, 13, 16, 19, 22, 25, 29, 32, 35, 38, 41):
             for p in build_symbol(nominal, 40.0):
                 if p['kind'] == KIND_CIRCLE:
                     assert p['center'] == [0.0, 0.0]
+
+
+class TestTranslate:
+    def test_circle_center_moves(self) -> None:
+        moved = translate(build_symbol(22, 40.0), 100.0, -50.0)
+        circle = next(p for p in moved if p['kind'] == KIND_CIRCLE)
+        assert circle['center'] == [100.0, -50.0]
+        assert circle['radius'] == 20.0  # 半径は不変
+
+    def test_line_endpoints_move(self) -> None:
+        moved = translate(build_symbol(13, 40.0), 10.0, 20.0)
+        line = next(p for p in moved if p['kind'] == KIND_LINE)
+        # D13 の × は (-20,-20)-(20,20) 等。平行移動で両端が動く
+        assert line['start'] == [-20.0 + 10.0, -20.0 + 20.0]
+        assert line['end'] == [20.0 + 10.0, 20.0 + 20.0]
+
+    def test_zero_translation_is_identity(self) -> None:
+        base = build_symbol(29, 40.0)
+        assert translate(base, 0.0, 0.0) == base
+
+    def test_does_not_mutate_input(self) -> None:
+        base = build_symbol(22, 40.0)
+        before = [dict(p) for p in base]
+        translate(base, 5.0, 5.0)
+        assert base == before

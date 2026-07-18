@@ -88,7 +88,8 @@ pyproject.toml           # パッケージメタデータ
 ### 断面 2D コンポーネント（vw/component.py）
 
 - **`vs.Set2DComponentGroup(pio, group, component)`（VW 2019+）** で PIO の 2D コンポーネントグループを設定する。component 定数は公式リファレンス（Table - 2D components）に基づく: `0`=未設定, `1`=Top, `2`=Bottom, `3`=Top/Bottom Cut, `4`=Front, `5`=Back, **`6`=Front and Back Cut**, `7`=Left, `8`=Right, **`9`=Left and Right Cut**, `10`=Top/Plan。
-- 命令セットの `target` との対応: `front_back` → 6（紙面 u=ローカル X・v=ローカル Z）、`left_right` → 9（紙面 u=ローカル Y・v=ローカル Z）。鉄筋を端から見た記号は向きに依存しないため両方に同じ記号を設定する。
+- 命令セットの `target` との対応: `front_back` → 6（紙面 u=ローカル X・v=ローカル Z）、`left_right` → 9（紙面 u=ローカル Y・v=ローカル Z）。鉄筋を端から見た記号は向きに依存しないため両方に同じ形の記号を設定する。
+- **断面記号は原点固定ではなく、鉄筋の断面位置（パスの重心を各断面の紙面へ投影した点）に置く**。断面ビューポートは 3D の鉄筋（ソリッド）を実位置で切断するため、記号を原点に固定すると PIO のローカル原点とパスの実位置の差だけ記号がずれ、断面ビューポートで本体と食い違う（VW 上で観測。3D パス編集画面での位置とデザインレイヤの描画位置に差があると、記号がその差だけ反対側へずれる）。記号を 3D と同じパス座標へ結び付けることで本体と一致させる。
 - **平面線は通常の 2D 図形（regen）として描く**。**断面記号は `Set2DComponentGroup` で 6/9 に割り当てた後、元グループを `vs.DelObject` で regen から削除する**（コンポーネント側へジオメトリをコピーするため、regen の元グループを消しても断面ビューポートには記号が残る）。命令が無い target は NULL ハンドルを設定して前回リセットのコンポーネントを消す。
 - **2D 線・円は画面平面（screen plane, planar ref 0）に置く**（`vw/draw.py` の `set_screen_plane`）。`Set2DComponentGroup` は画面平面のオブジェクトのグループを要求するため。
 - **`vs.SetTopPlan2DComp(pio, 0)` で Top/Plan ビューを Top（非断面）に固定する**。

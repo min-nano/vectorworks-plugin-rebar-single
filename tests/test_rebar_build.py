@@ -47,14 +47,42 @@ class TestBuildDocument:
             {'start': [500.0, 0.0], 'end': [500.0, 300.0]},
         ]
 
-    def test_cut_marks_both_targets(self) -> None:
+    def test_cut_marks_both_targets_same_shape(self) -> None:
         doc = build_document(_params())
         targets = {m['target'] for m in doc['cut_marks']}
         assert targets == {'front_back', 'left_right'}
-        # 前後/左右で同じ記号
+        # 前後/左右で記号の「形」(種類・数)は同じ
         fb = next(m for m in doc['cut_marks'] if m['target'] == 'front_back')
         lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
-        assert fb['primitives'] == lr['primitives']
+        assert [p['kind'] for p in fb['primitives']] == [
+            p['kind'] for p in lr['primitives']
+        ]
+
+    def test_symbol_placed_at_projected_centroid(self) -> None:
+        # パス重心 (500,0,0) を各断面の紙面へ投影:
+        # front_back=(X,Z)=(500,0)、left_right=(Y,Z)=(0,0)。
+        # D22=○ の円の中心がそこに来る。
+        doc = build_document(_params(bar='D22'))
+        fb = next(m for m in doc['cut_marks'] if m['target'] == 'front_back')
+        lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
+        fb_circle = next(p for p in fb['primitives'] if p['kind'] != KIND_LINE)
+        lr_circle = next(p for p in lr['primitives'] if p['kind'] != KIND_LINE)
+        assert fb_circle['center'] == [500.0, 0.0]
+        assert lr_circle['center'] == [0.0, 0.0]
+
+    def test_symbol_tracks_offset_path(self) -> None:
+        # パスが原点から離れていても記号は断面位置に付く(原点固定でない)。
+        # centroid=(100,700,-50) → front_back=(X,Z)=(100,-50)、
+        # left_right=(Y,Z)=(700,-50)。
+        doc = build_document(
+            _params(bar='D22', path=[[100.0, 200.0, -50.0], [100.0, 1200.0, -50.0]])
+        )
+        fb = next(m for m in doc['cut_marks'] if m['target'] == 'front_back')
+        lr = next(m for m in doc['cut_marks'] if m['target'] == 'left_right')
+        fb_circle = next(p for p in fb['primitives'] if p['kind'] != KIND_LINE)
+        lr_circle = next(p for p in lr['primitives'] if p['kind'] != KIND_LINE)
+        assert fb_circle['center'] == [100.0, -50.0]
+        assert lr_circle['center'] == [700.0, -50.0]
 
     def test_d13_symbol_is_cross(self) -> None:
         # D13 は × (線 2 本のみ)
