@@ -60,3 +60,6 @@ jobs:
           file: cobertura.xml
           language: Python
           label: code-coverage/pytest-cov
+          # このリポジトリで Code Quality が未有効の間はアップロードの
+          # 失敗(HTTP 403)で CI を落とさない(有効化されれば反映される)
+          fail-on-error: false
