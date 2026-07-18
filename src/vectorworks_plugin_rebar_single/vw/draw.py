@@ -81,6 +81,9 @@ def draw_circle_2d(
         try:
             vs.SetFPat(handle, SOLID_FILL_PATTERN if filled else NO_FILL_PATTERN)
         except Exception:
+            # 円オブジェクト自体は生成済み。塗りパターン設定は
+            # VectorWorks の環境差(関数の有無等)で失敗し得るが、記号の描画
+            # 継続を優先し、非致命として無視する(塗り/輪郭はクラス属性に従う)。
             pass
     return handle
 
