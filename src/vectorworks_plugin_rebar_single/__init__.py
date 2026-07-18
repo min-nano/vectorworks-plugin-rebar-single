@@ -53,8 +53,15 @@ def run() -> None:
         # 含まない)ことを保証する
         document = json.loads(json.dumps(build_document(params)))
 
-        # フェーズ2: 命令セットに従って描画
-        execute_document(document, pio_handle)
+        # フェーズ2: 命令セットに従って描画。断面記号ソリッドは
+        # SymbolClass で指定するクラスに割り当てる(命令セットは作図クラスを
+        # 持たないため、クラス名は params から描画フェーズへ直接渡す)。
+        symbol_class = params.get('symbol_class', '')
+        execute_document(
+            document,
+            pio_handle,
+            symbol_class if isinstance(symbol_class, str) else '',
+        )
     except SpecError as error:
         vs.Message(f'鉄筋: {error}')
     except Exception as error:

@@ -20,6 +20,7 @@ import vs
 # 定義と一致させること。
 PARAM_BAR = 'Bar'
 PARAM_MARK_SCALE = 'MarkScale'
+PARAM_SYMBOL_CLASS = 'SymbolClass'
 
 # 数値フィールドの文字列から数値部分を取り出す(単位付き "13.0mm" や
 # 桁区切りを許容する)
@@ -75,6 +76,7 @@ def read_pio_input() -> Optional[Tuple[Any, Dict[str, Any]]]:
     params: Dict[str, Any] = {
         'path': read_path(pio_handle),
         'bar': field(PARAM_BAR),
+        'symbol_class': field(PARAM_SYMBOL_CLASS),
     }
     mark_scale = _number(field(PARAM_MARK_SCALE))
     if mark_scale is not None:

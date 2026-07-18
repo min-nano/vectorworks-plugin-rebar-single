@@ -4,60 +4,41 @@
 描画フェーズ(``vw`` パッケージ)が消費する JSON 直列化可能な dict。
 このモジュールは vs に依存しない。
 
-この PIO(鉄筋)は 3D パスに沿って **1 本の鉄筋** を配置するシンプルな
-ツールで、出力は 3 系統:
+この PIO(鉄筋)は 3D パスに沿って **1 本の鉄筋** を配置するツールで、
+出力は 3 系統:
 
-1. 3D ソリッド(``solid``): 鉄筋径の円形断面をパスに沿って押し出した
-   ソリッド。断面ビューポートはこの 3D ソリッドをネイティブに切断できる
-   ため、複雑な形状でも正しい位置に断面が出る。
-2. 平面線(``plan_lines``): 上から見たパスの投影図(2D 線)。デザイン
-   レイヤの平面ビュー(Top/Plan)に表示する。
-3. 断面 2D コンポーネント(``cut_marks``): 断面ビューポートの
-   「2D コンポーネントを表示」で表示される記号。鉄筋径に応じた ●/× 等
-   (配筋標準図 KSE 2008 の表示記号)。前後/左右どちらの断面でも同じ記号
-   を出すため、両方の target 分を生成する。
+1. 本体(``tube_diameter`` + ``path``): 鉄筋径(最外径)の円形断面をパスに
+   沿って押し出した丸鋼のソリッド。3D ビューの鉄筋本体。
+2. 平面線(``plan_lines``): 上から見たパスの投影図(2D 線)。
+3. 断面記号ソリッド(``symbol_profiles`` + ``path``): 呼び径に応じた表示
+   記号(●/× 等、配筋標準図 KSE 2008)の**断面形状**をパスに沿って押し出した
+   ソリッド。断面ビューポートはこの 3D ソリッドをネイティブに切断するため、
+   どの位置・向きで切っても正しい位置に記号が出る(斜め配筋も可)。記号
+   ソリッドは本体とは別のクラス(``SymbolClass`` パラメータ、描画フェーズが
+   適用)に割り当て、ビューポートごとにクラス表示を切り替えて 3D では本体、
+   断面では記号を見せる運用にする。
 
-図形の作図クラスは命令セットには含まれない。すべての図形は描画フェーズが
-PIO 本体の描画クラス(``vs.GetClass(pio)``)に割り当てる(クラス指定は
-PIO を扱う側=PIO 本体へのクラス割り当てで管理する)。
+本体・平面線は描画フェーズが PIO 本体の描画クラス(``vs.GetClass(pio)``)に
+割り当てる。記号ソリッドだけは別クラス(``SymbolClass``)に割り当てる。
+作図クラスは命令セットには含めない(クラス管理は描画フェーズ=PIO を扱う側)。
 
-スキーマ (version 1):
+断面プロファイル(``symbol_profiles``)は断面(パスに直交する紙面)上の
+塗り形状で、原点(0, 0)中心に組み立てる。押し出しがパスに沿って配置する
+ため、記号の紙面上の位置合わせは不要(3D ソリッドの実断面が位置を決める)。
+プロファイルの種類:
+
+    {"kind": "disk",    "center": [u, v], "radius": r}          # 塗り円
+    {"kind": "ring",    "center": [u, v], "outer": ro, "inner": ri}  # 中空リング
+    {"kind": "polygon", "points": [[u, v], ...]}                # 塗り多角形(× の帯等)
+
+スキーマ (version 2):
 
     {
-        "version": 1,
-        "solid": {
-            # 3D ソリッド(円形断面のパス押し出し)。描画フェーズが
-            # ``CreateExtrudeAlongPath`` で生成する(失敗時は 3D ポリラインへ
-            # フォールバック)。座標は PIO のローカル座標 (mm)。
-            "diameter": 14.0,               # 断面円の直径 = 最外径 (mm)
-            "path": [[x, y, z], ...]        # 3D パス頂点(鉄筋の芯線)
-        },
-        "plan_lines": [
-            {
-                # 上から見たパスの投影図(2D 線)。座標は PIO のローカル
-                # 座標 (mm)。デザインレイヤの平面ビューに表示する。
-                "start": [x1, y1],
-                "end": [x2, y2]
-            }
-        ],
-        "cut_marks": [
-            {
-                # 断面 2D コンポーネントに描く記号。target はどの 2D
-                # コンポーネントに置くか:
-                #   "front_back" = 前後の断面 (2D component 定数 6,
-                #                  紙面 u=ローカル X, v=ローカル Z)
-                #   "left_right" = 左右の断面 (2D component 定数 9,
-                #                  紙面 u=ローカル Y, v=ローカル Z)
-                # 鉄筋を端から見た記号は向きに依存しないため、両方の
-                # target に同じ primitives を生成する。primitives は記号を
-                # 構成する線・円のプリミティブ(紙面ローカル座標 mm):
-                #   {"kind": "line",   "start": [u, v], "end": [u, v]}
-                #   {"kind": "circle", "center": [u, v], "radius": r,
-                #    "filled": true|false}
-                "target": "front_back",
-                "primitives": [ ... ]
-            }
-        ]
+        "version": 2,
+        "path": [[x, y, z], ...],   # 3D パス頂点(鉄筋の芯線, PIO ローカル座標 mm)
+        "tube_diameter": 14.0,      # 本体丸鋼の直径(最外径, mm)
+        "plan_lines": [ {"start": [x, y], "end": [x, y]} ],
+        "symbol_profiles": [ <profile>, ... ]
     }
 
 スキーマを変更するときは ``DOCUMENT_VERSION`` の互換性に注意し、
@@ -68,31 +49,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, TypedDict
 
-DOCUMENT_VERSION = 1
+DOCUMENT_VERSION = 2
 
-# cut_marks の target に指定できる値。
-TARGET_FRONT_BACK = 'front_back'
-TARGET_LEFT_RIGHT = 'left_right'
-CUT_TARGETS = (TARGET_FRONT_BACK, TARGET_LEFT_RIGHT)
+# symbol_profiles の kind。
+KIND_DISK = 'disk'
+KIND_RING = 'ring'
+KIND_POLYGON = 'polygon'
+PROFILE_KINDS = (KIND_DISK, KIND_RING, KIND_POLYGON)
 
-# primitives の kind。
-KIND_LINE = 'line'
-KIND_CIRCLE = 'circle'
-PRIMITIVE_KINDS = (KIND_LINE, KIND_CIRCLE)
-
-
-# 記号を構成するプリミティブ(線 or 円)。線・円で持つキーが異なる
-# 不均質な dict のため、TypedDict の Union ではなく実行時検証
+# 断面プロファイル(線・円で持つキーが異なる不均質な dict)。実行時検証
 # (``validate_document``)で形を保証する ``Dict[str, Any]`` として扱う。
-# 形式:
-#   線: {"kind": "line",   "start": [u, v], "end": [u, v]}
-#   円: {"kind": "circle", "center": [u, v], "radius": r, "filled": bool}
-Primitive = Dict[str, Any]
-
-
-class Solid(TypedDict):
-    diameter: float
-    path: List[List[float]]
+Profile = Dict[str, Any]
 
 
 class PlanLineCommand(TypedDict):
@@ -100,23 +67,23 @@ class PlanLineCommand(TypedDict):
     end: List[float]
 
 
-class CutMarkCommand(TypedDict):
-    target: str
-    primitives: List[Primitive]
-
-
 class Document(TypedDict):
     version: int
-    solid: Solid
+    path: List[List[float]]
+    tube_diameter: float
     plan_lines: List[PlanLineCommand]
-    cut_marks: List[CutMarkCommand]
+    symbol_profiles: List[Profile]
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _validate_point_2d(value: Any, where: str) -> None:
     if (
         not isinstance(value, list)
         or len(value) != 2
-        or not all(isinstance(v, (int, float)) for v in value)
+        or not all(_is_number(v) for v in value)
     ):
         raise ValueError(f'{where} は [x, y] の数値ペアである必要があります: {value!r}')
 
@@ -125,24 +92,16 @@ def _validate_point_3d(value: Any, where: str) -> None:
     if (
         not isinstance(value, list)
         or len(value) != 3
-        or not all(isinstance(v, (int, float)) for v in value)
+        or not all(_is_number(v) for v in value)
     ):
         raise ValueError(f'{where} は [x, y, z] の数値である必要があります: {value!r}')
 
 
-def _validate_solid(value: Any) -> None:
-    if not isinstance(value, dict):
-        raise ValueError('solid は dict である必要があります')
-    diameter = value.get('diameter')
-    if not isinstance(diameter, (int, float)) or isinstance(diameter, bool):
-        raise ValueError(f'solid.diameter は数値である必要があります: {diameter!r}')
-    if diameter <= 0:
-        raise ValueError(f'solid.diameter は正の値である必要があります: {diameter!r}')
-    path = value.get('path')
-    if not isinstance(path, list) or len(path) < 2:
-        raise ValueError('solid.path は 2 点以上の頂点リストである必要があります')
-    for i, vertex in enumerate(path):
-        _validate_point_3d(vertex, f'solid.path[{i}]')
+def _validate_path(value: Any) -> None:
+    if not isinstance(value, list) or len(value) < 2:
+        raise ValueError('path は 2 点以上の頂点リストである必要があります')
+    for i, vertex in enumerate(value):
+        _validate_point_3d(vertex, f'path[{i}]')
 
 
 def _validate_plan_line(command: Any, index: int) -> None:
@@ -153,42 +112,37 @@ def _validate_plan_line(command: Any, index: int) -> None:
     _validate_point_2d(command.get('end'), f'{where}.end')
 
 
-def _validate_primitive(primitive: Any, where: str) -> None:
-    if not isinstance(primitive, dict):
+def _validate_positive(value: Any, where: str) -> None:
+    if not _is_number(value):
+        raise ValueError(f'{where} は数値である必要があります: {value!r}')
+    if value <= 0:
+        raise ValueError(f'{where} は正の値である必要があります: {value!r}')
+
+
+def _validate_profile(profile: Any, index: int) -> None:
+    where = f'symbol_profiles[{index}]'
+    if not isinstance(profile, dict):
         raise ValueError(f'{where} は dict である必要があります')
-    kind = primitive.get('kind')
-    if kind == KIND_LINE:
-        _validate_point_2d(primitive.get('start'), f'{where}.start')
-        _validate_point_2d(primitive.get('end'), f'{where}.end')
-    elif kind == KIND_CIRCLE:
-        _validate_point_2d(primitive.get('center'), f'{where}.center')
-        radius = primitive.get('radius')
-        if not isinstance(radius, (int, float)) or isinstance(radius, bool):
-            raise ValueError(f'{where}.radius は数値である必要があります: {radius!r}')
-        if radius <= 0:
-            raise ValueError(f'{where}.radius は正の値である必要があります: {radius!r}')
-        if not isinstance(primitive.get('filled'), bool):
-            raise ValueError(f'{where}.filled は bool である必要があります')
+    kind = profile.get('kind')
+    if kind == KIND_DISK:
+        _validate_point_2d(profile.get('center'), f'{where}.center')
+        _validate_positive(profile.get('radius'), f'{where}.radius')
+    elif kind == KIND_RING:
+        _validate_point_2d(profile.get('center'), f'{where}.center')
+        _validate_positive(profile.get('outer'), f'{where}.outer')
+        _validate_positive(profile.get('inner'), f'{where}.inner')
+        if profile['inner'] >= profile['outer']:
+            raise ValueError(f'{where}.inner は outer より小さい必要があります')
+    elif kind == KIND_POLYGON:
+        points = profile.get('points')
+        if not isinstance(points, list) or len(points) < 3:
+            raise ValueError(f'{where}.points は 3 点以上の頂点リストである必要があります')
+        for i, point in enumerate(points):
+            _validate_point_2d(point, f'{where}.points[{i}]')
     else:
         raise ValueError(
-            f'{where}.kind は {PRIMITIVE_KINDS} のいずれかである必要があります: {kind!r}'
+            f'{where}.kind は {PROFILE_KINDS} のいずれかである必要があります: {kind!r}'
         )
-
-
-def _validate_cut_mark(command: Any, index: int) -> None:
-    where = f'cut_marks[{index}]'
-    if not isinstance(command, dict):
-        raise ValueError(f'{where} は dict である必要があります')
-    if command.get('target') not in CUT_TARGETS:
-        raise ValueError(
-            f'{where}.target は {CUT_TARGETS} のいずれかである必要があります: '
-            f'{command.get("target")!r}'
-        )
-    primitives = command.get('primitives')
-    if not isinstance(primitives, list) or not primitives:
-        raise ValueError(f'{where}.primitives は 1 個以上のリストである必要があります')
-    for i, primitive in enumerate(primitives):
-        _validate_primitive(primitive, f'{where}.primitives[{i}]')
 
 
 def validate_document(document: Any) -> Document:
@@ -205,14 +159,18 @@ def validate_document(document: Any) -> Document:
             f'命令セットの version が {DOCUMENT_VERSION} ではありません: '
             f'{document.get("version")!r}'
         )
-    _validate_solid(document.get('solid'))
-    for key, validator in (
-        ('plan_lines', _validate_plan_line),
-        ('cut_marks', _validate_cut_mark),
-    ):
-        commands = document.get(key)
-        if not isinstance(commands, list):
-            raise ValueError(f'{key} はリストである必要があります')
-        for index, command in enumerate(commands):
-            validator(command, index)
+    _validate_path(document.get('path'))
+    _validate_positive(document.get('tube_diameter'), 'tube_diameter')
+
+    plan_lines = document.get('plan_lines')
+    if not isinstance(plan_lines, list):
+        raise ValueError('plan_lines はリストである必要があります')
+    for index, command in enumerate(plan_lines):
+        _validate_plan_line(command, index)
+
+    profiles = document.get('symbol_profiles')
+    if not isinstance(profiles, list):
+        raise ValueError('symbol_profiles はリストである必要があります')
+    for index, profile in enumerate(profiles):
+        _validate_profile(profile, index)
     return document  # type: ignore[return-value]
