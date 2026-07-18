@@ -18,13 +18,11 @@ def _valid() -> Dict[str, Any]:
         'tube_diameter': 14.0,
         'plan_lines': [{'start': [0.0, 0.0], 'end': [1000.0, 0.0]}],
         'symbol_profiles': [
-            {'kind': 'disk', 'center': [0.0, 0.0], 'radius': 26.0},
-            {'kind': 'ring', 'center': [0.0, 0.0], 'outer': 26.0, 'inner': 20.0},
-            {
-                'kind': 'polygon',
-                'points': [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]],
-            },
+            {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 26.0, 'filled': False},
+            {'kind': 'circle', 'center': [0.0, 0.0], 'radius': 6.0, 'filled': True},
+            {'kind': 'line', 'start': [-18.0, -18.0], 'end': [18.0, 18.0]},
         ],
+        'plan_center': [500.0, 0.0],
     }
 
 
@@ -72,21 +70,21 @@ class TestValidateDocument:
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_disk_bad_radius(self) -> None:
+    def test_circle_bad_radius(self) -> None:
         doc = _valid()
         doc['symbol_profiles'][0]['radius'] = 0
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_ring_inner_ge_outer(self) -> None:
+    def test_circle_missing_filled(self) -> None:
         doc = _valid()
-        doc['symbol_profiles'][1]['inner'] = 30.0
+        del doc['symbol_profiles'][0]['filled']
         with pytest.raises(ValueError):
             validate_document(doc)
 
-    def test_polygon_too_few_points(self) -> None:
+    def test_line_bad_point(self) -> None:
         doc = _valid()
-        doc['symbol_profiles'][2]['points'] = [[0.0, 0.0], [1.0, 1.0]]
+        doc['symbol_profiles'][2]['start'] = [1.0]
         with pytest.raises(ValueError):
             validate_document(doc)
 
@@ -101,3 +99,15 @@ class TestValidateDocument:
         doc = _valid()
         doc['symbol_profiles'] = []
         assert validate_document(doc) is not None
+
+    def test_plan_center_required(self) -> None:
+        doc = _valid()
+        del doc['plan_center']
+        with pytest.raises(ValueError):
+            validate_document(doc)
+
+    def test_plan_center_bad(self) -> None:
+        doc = _valid()
+        doc['plan_center'] = [1.0, 2.0, 3.0]
+        with pytest.raises(ValueError):
+            validate_document(doc)

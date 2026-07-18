@@ -5,11 +5,13 @@
 このモジュールは vs に依存しない。
 
 この PIO(鉄筋)は 3D パスに沿って **1 本の鉄筋** を配置するツールで、
-出力は 3 系統:
+出力は 4 系統:
 
 1. 本体(``tube_diameter`` + ``path``): 鉄筋径(最外径)の円形断面をパスに
    沿って押し出した丸鋼のソリッド。3D ビューの鉄筋本体。
-2. 平面線(``plan_lines``): 上から見たパスの投影図(2D 線)。
+2. 平面線(``plan_lines``): 上から見たパスの投影図(面内の鉄筋, 2D 線)。
+2b. 平面 2D 記号(``symbol_profiles`` + ``plan_center``): 呼び径の表示記号を
+    ``plan_center`` へ描いた 2D 線画。縦筋(上から見ると点)を ●/× で示す。
 3. 断面記号ソリッド(``symbol_profiles`` + ``path``): 呼び径に応じた表示
    記号(●/× 等、配筋標準図 KSE 2008)の**断面形状**をパスに沿って押し出した
    ソリッド。断面ビューポートはこの 3D ソリッドをネイティブに切断するため、
@@ -23,13 +25,16 @@
 作図クラスは命令セットには含めない(クラス管理は描画フェーズ=PIO を扱う側)。
 
 断面プロファイル(``symbol_profiles``)は断面(パスに直交する紙面)上の
-塗り形状で、原点(0, 0)中心に組み立てる。押し出しがパスに沿って配置する
-ため、記号の紙面上の位置合わせは不要(3D ソリッドの実断面が位置を決める)。
-プロファイルの種類:
+線画で、原点(0, 0)中心に組み立てる。押し出しがパスに沿って配置するため、
+記号の紙面上の位置合わせは不要(3D の実断面が位置を決める)。記号は
+体積のあるソリッドではなく、**開いた線/円をパスに沿って押し出した面**に
+して、断面の切断が**線画**(細い × ・輪郭の ○)として出るようにする
+(塗り円 ● だけは塗り面=ソリッドにする):
 
-    {"kind": "disk",    "center": [u, v], "radius": r}          # 塗り円
-    {"kind": "ring",    "center": [u, v], "outer": ro, "inner": ri}  # 中空リング
-    {"kind": "polygon", "points": [[u, v], ...]}                # 塗り多角形(× の帯等)
+    {"kind": "line",   "start": [u, v], "end": [u, v]}          # 線(× ・+ ・斜線)→ 面
+    {"kind": "circle", "center": [u, v], "radius": r, "filled": bool}
+        # filled=false: 輪郭の円(○ 等)→ 筒面(切断=輪郭線)
+        # filled=true:  塗り円(● 等)→ ソリッド(切断=塗り円)
 
 スキーマ (version 2):
 
@@ -37,9 +42,17 @@
         "version": 2,
         "path": [[x, y, z], ...],   # 3D パス頂点(鉄筋の芯線, PIO ローカル座標 mm)
         "tube_diameter": 14.0,      # 本体丸鋼の直径(最外径, mm)
-        "plan_lines": [ {"start": [x, y], "end": [x, y]} ],
-        "symbol_profiles": [ <profile>, ... ]
+        "plan_lines": [ {"start": [x, y], "end": [x, y]} ],  # 投影図(面内の鉄筋)
+        "symbol_profiles": [ <profile>, ... ],  # 記号の断面(原点中心)。3D 押し出し
+                                                # と 2D 平面記号の両方に使う
+        "plan_center": [cx, cy]     # 平面ビューの 2D 記号を描く位置(パスの XY 重心)
     }
+
+``symbol_profiles`` は原点(0,0)中心の記号断面で、(1)パスに沿って押し出して
+断面ソリッド/面にする、(2)``plan_center`` へ平行移動して平面ビューの 2D 記号
+(regen)として描く、の両方に使う。平面では 3D の端部投影(カギ状)ではなく
+このクリーンな 2D 記号を出す(ハイブリッド図形は Top/Plan で 2D regen を表示
+するため)。縦筋は平面で点になるので記号で示し、退化した投影線分は描かない。
 
 スキーマを変更するときは ``DOCUMENT_VERSION`` の互換性に注意し、
 TypedDict 定義・docstring・``validate_document()`` とテストも併せて
@@ -52,10 +65,9 @@ from typing import Any, Dict, List, TypedDict
 DOCUMENT_VERSION = 2
 
 # symbol_profiles の kind。
-KIND_DISK = 'disk'
-KIND_RING = 'ring'
-KIND_POLYGON = 'polygon'
-PROFILE_KINDS = (KIND_DISK, KIND_RING, KIND_POLYGON)
+KIND_LINE = 'line'
+KIND_CIRCLE = 'circle'
+PROFILE_KINDS = (KIND_LINE, KIND_CIRCLE)
 
 # 断面プロファイル(線・円で持つキーが異なる不均質な dict)。実行時検証
 # (``validate_document``)で形を保証する ``Dict[str, Any]`` として扱う。
@@ -73,6 +85,7 @@ class Document(TypedDict):
     tube_diameter: float
     plan_lines: List[PlanLineCommand]
     symbol_profiles: List[Profile]
+    plan_center: List[float]
 
 
 def _is_number(value: Any) -> bool:
@@ -124,21 +137,14 @@ def _validate_profile(profile: Any, index: int) -> None:
     if not isinstance(profile, dict):
         raise ValueError(f'{where} は dict である必要があります')
     kind = profile.get('kind')
-    if kind == KIND_DISK:
+    if kind == KIND_LINE:
+        _validate_point_2d(profile.get('start'), f'{where}.start')
+        _validate_point_2d(profile.get('end'), f'{where}.end')
+    elif kind == KIND_CIRCLE:
         _validate_point_2d(profile.get('center'), f'{where}.center')
         _validate_positive(profile.get('radius'), f'{where}.radius')
-    elif kind == KIND_RING:
-        _validate_point_2d(profile.get('center'), f'{where}.center')
-        _validate_positive(profile.get('outer'), f'{where}.outer')
-        _validate_positive(profile.get('inner'), f'{where}.inner')
-        if profile['inner'] >= profile['outer']:
-            raise ValueError(f'{where}.inner は outer より小さい必要があります')
-    elif kind == KIND_POLYGON:
-        points = profile.get('points')
-        if not isinstance(points, list) or len(points) < 3:
-            raise ValueError(f'{where}.points は 3 点以上の頂点リストである必要があります')
-        for i, point in enumerate(points):
-            _validate_point_2d(point, f'{where}.points[{i}]')
+        if not isinstance(profile.get('filled'), bool):
+            raise ValueError(f'{where}.filled は bool である必要があります')
     else:
         raise ValueError(
             f'{where}.kind は {PROFILE_KINDS} のいずれかである必要があります: {kind!r}'
@@ -173,4 +179,6 @@ def validate_document(document: Any) -> Document:
         raise ValueError('symbol_profiles はリストである必要があります')
     for index, profile in enumerate(profiles):
         _validate_profile(profile, index)
+
+    _validate_point_2d(document.get('plan_center'), 'plan_center')
     return document  # type: ignore[return-value]

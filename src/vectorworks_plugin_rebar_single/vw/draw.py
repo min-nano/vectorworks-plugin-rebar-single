@@ -13,7 +13,7 @@ API で描画する。作図クラスは呼び出し側が渡す(本体・平面
 """
 from __future__ import annotations
 
-from typing import Any, List, Sequence
+from typing import Any, Sequence
 
 import vs
 
@@ -47,15 +47,44 @@ def _null(handle: Any) -> bool:
         return handle is None
 
 
+# 塗りパターン: 1=実塗り(前景色ベタ)、0=塗りなし。記号の ●/○ は意味が
+# 塗り/輪郭で決まるため、クラス塗りに関わらず明示する。
+SOLID_FILL_PATTERN = 1
+NO_FILL_PATTERN = 0
+
+
 def draw_line_2d(
     start: Sequence[float], end: Sequence[float], class_name: str
 ) -> Any:
-    """2D の線(平面投影)を描き、ハンドルを返す。"""
+    """2D の線(平面投影・平面記号の線)を描き、ハンドルを返す。"""
     vs.MoveTo((start[0], start[1]))
     vs.LineTo((end[0], end[1]))
     handle = vs.LNewObj()
     if not _null(handle):
         set_class_with_attributes(handle, class_name)
+    return handle
+
+
+def draw_circle_2d(
+    center: Sequence[float], radius: float, filled: bool, class_name: str
+) -> Any:
+    """2D の円(平面記号の ○ ・●)を描き、ハンドルを返す。
+
+    記号の意味に合わせ、``filled=True`` は実塗り(●)、``filled=False`` は
+    塗りなしの輪郭(○)にする(クラス塗りに関わらず明示)。
+    """
+    cx, cy = center[0], center[1]
+    vs.Oval((cx - radius, cy + radius), (cx + radius, cy - radius))
+    handle = vs.LNewObj()
+    if not _null(handle):
+        set_class_with_attributes(handle, class_name)
+        try:
+            vs.SetFPat(handle, SOLID_FILL_PATTERN if filled else NO_FILL_PATTERN)
+        except Exception:
+            # 円オブジェクト自体は生成済み。塗りパターン設定は
+            # VectorWorks の環境差(関数の有無等)で失敗し得るが、記号の描画
+            # 継続を優先し、非致命として無視する(塗り/輪郭はクラス属性に従う)。
+            pass
     return handle
 
 
@@ -76,15 +105,32 @@ def _build_nurbs_path(vertices: Sequence[Sequence[float]]) -> Any:
 
 
 def _oval_profile(cx: float, cy: float, radius: float) -> Any:
-    """原点系の真円プロファイル(``vs.Oval``)を作りハンドルを返す。"""
+    """原点系の塗り円プロファイル(``vs.Oval``, 閉じた面)を作りハンドルを返す。
+
+    閉じた塗り形状のため、押し出すとソリッド(切断=塗り円)になる。
+    """
     vs.Oval((cx - radius, cy + radius), (cx + radius, cy - radius))
     return vs.LNewObj()
 
 
-def _polygon_profile(points: Sequence[Sequence[float]]) -> Any:
-    """塗り多角形プロファイル(``vs.Poly``)を作りハンドルを返す。"""
-    coordinates: List[float] = [c for point in points for c in point]
-    vs.Poly(*coordinates)
+def _circle_curve_profile(cx: float, cy: float, radius: float) -> Any:
+    """輪郭だけの円プロファイル(``vs.ArcByCenter`` 360°)を作りハンドルを返す。
+
+    開いた曲線のため、押し出すと筒面(切断=輪郭線)になる。
+    """
+    vs.ArcByCenter(cx, cy, radius, 0.0, 360.0)
+    return vs.LNewObj()
+
+
+def _line_profile(
+    start: Sequence[float], end: Sequence[float]
+) -> Any:
+    """直線プロファイル(``vs.MoveTo``/``vs.LineTo``)を作りハンドルを返す。
+
+    開いた線のため、押し出すと平面(切断=線)になる。
+    """
+    vs.MoveTo((start[0], start[1]))
+    vs.LineTo((end[0], end[1]))
     return vs.LNewObj()
 
 
@@ -130,52 +176,40 @@ def draw_tube(
     return solid
 
 
-def draw_symbol_disk(
+def draw_symbol_line(
+    start: Sequence[float],
+    end: Sequence[float],
+    path: Sequence[Sequence[float]],
+    class_name: str,
+) -> Any:
+    """線プロファイルをパスに沿って押し出す(記号の × ・+ ・斜線)。
+
+    開いた線を押し出すと平面(帯)になり、断面の切断で線として現れる。
+    """
+    solid = _extrude(path, _line_profile(start, end))
+    if not _null(solid):
+        set_class_with_attributes(solid, class_name)
+    return solid
+
+
+def draw_symbol_circle(
     center: Sequence[float],
     radius: float,
+    filled: bool,
     path: Sequence[Sequence[float]],
     class_name: str,
 ) -> Any:
-    """塗り円プロファイルをパスに沿って押し出す(記号の ●・中心点)。"""
-    solid = _extrude(path, _oval_profile(center[0], center[1], radius))
+    """円プロファイルをパスに沿って押し出す(記号の ○ ・●)。
+
+    ``filled=True`` は塗り円(``vs.Oval``)を押し出してソリッド(切断=塗り円)、
+    ``filled=False`` は輪郭円(``vs.ArcByCenter`` 360°)を押し出して筒面
+    (切断=輪郭線)にする。
+    """
+    if filled:
+        profile = _oval_profile(center[0], center[1], radius)
+    else:
+        profile = _circle_curve_profile(center[0], center[1], radius)
+    solid = _extrude(path, profile)
     if not _null(solid):
         set_class_with_attributes(solid, class_name)
     return solid
-
-
-def draw_symbol_polygon(
-    points: Sequence[Sequence[float]],
-    path: Sequence[Sequence[float]],
-    class_name: str,
-) -> Any:
-    """塗り多角形プロファイルをパスに沿って押し出す(記号の × 等の帯)。"""
-    solid = _extrude(path, _polygon_profile(points))
-    if not _null(solid):
-        set_class_with_attributes(solid, class_name)
-    return solid
-
-
-def draw_symbol_ring(
-    center: Sequence[float],
-    outer: float,
-    inner: float,
-    path: Sequence[Sequence[float]],
-    class_name: str,
-) -> Any:
-    """中空リング(○ 等)を外側ソリッドから内側ソリッドを引いて作る。"""
-    outer_solid = _extrude(path, _oval_profile(center[0], center[1], outer))
-    if _null(outer_solid):
-        return outer_solid
-    inner_solid = _extrude(path, _oval_profile(center[0], center[1], inner))
-    if _null(inner_solid):
-        # 中空にできない場合は塗り円で妥協する
-        set_class_with_attributes(outer_solid, class_name)
-        return outer_solid
-    try:
-        _status, ring = vs.SubtractSolid(outer_solid, inner_solid)
-    except Exception:
-        set_class_with_attributes(outer_solid, class_name)
-        return outer_solid
-    result = ring if not _null(ring) else outer_solid
-    set_class_with_attributes(result, class_name)
-    return result

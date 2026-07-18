@@ -1,142 +1,128 @@
-"""断面の表示記号(●/× 等)を押し出しソリッドの断面プロファイルへ分解する。
-vs に依存しない。
+"""断面の表示記号(●/× 等)を線画のプロファイルへ分解する。vs に依存しない。
 
 配筋標準図(KSE 2008)「鉄筋の表示記号」に従い、呼び径ごとに断面の表示
-記号を **塗り形状のプロファイル**(円=disk、中空リング=ring、多角形=polygon)
-へ分解する。プロファイルはパスに沿って押し出され、断面ビューポートで
-ネイティブに切断されて記号として現れる:
+記号を **線画のプロファイル**(線=line、円=circle)へ分解する。プロファイルは
+パスに沿って押し出され(線・輪郭円=面、塗り円=ソリッド)、断面ビューポート
+でネイティブに切断されて記号として現れる:
 
     呼び径  記号
     D10     ●   小さい塗り丸
-    D13     ×   斜め十字(帯 2 本)
-    D16     ⊘   リング + 斜線(帯 1 本)
+    D13     ×   斜め十字(線 2 本)
+    D16     ⊘   円 + 斜線(線 1 本)
     D19     ●   大きい塗り丸(呼び径で自然に大きくなる)
-    D22     ○   リング
-    D25     ⊙   リング + 中心の塗り丸
-    D29     ⊗   リング + 内側の ×(帯 2 本)
-    D32     ◎   二重リング
-    D35     ⊕   リング + 十字(帯 2 本)
-    D38     ●⊕ 塗り丸 + 十字(帯 2 本)
-    D41     ⊗   リング + 内側の ×
+    D22     ○   円(輪郭)
+    D25     ⊙   円 + 中心の塗り丸
+    D29     ⊗   円 + 内側の ×(線 2 本)
+    D32     ◎   二重円
+    D35     ⊕   円 + 十字(線 2 本)
+    D38     ●⊕ 塗り丸 + 十字(線 2 本)
+    D41     ⊗   円 + 内側の ×
 
 記号の大きさは ``呼び径 × MarkScale``(= ``size``)を外径とし、断面
 (パスに直交する紙面)の原点(0, 0)を基準に組み立てる。押し出しがパスに
-沿って配置するため、記号の紙面上の位置合わせは不要(3D ソリッドの実断面が
-位置を決める)。○ 等の中空記号はリング(中空)で表す(実断面が塗り環に
-なり、壁を薄くして輪郭に見せる)。表にない呼び径は最も近い標準呼び径の
-記号で近似する。
+沿って配置するため、記号の紙面上の位置合わせは不要(3D の実断面が位置を
+決める)。輪郭の円(○ 等)は ``filled=false`` の円(押し出すと筒面になり、
+切断が輪郭線として出る)、塗り丸(●)は ``filled=true`` の円(押し出すと
+ソリッドになり、切断が塗り円として出る)。表にない呼び径は最も近い標準
+呼び径の記号で近似する。
 """
 from __future__ import annotations
 
 import math
 from typing import Callable, Dict, List
 
-from ..document import KIND_DISK, KIND_POLYGON, KIND_RING, Profile
+from ..document import KIND_CIRCLE, KIND_LINE, Profile
 
-# リングの内径比(壁の薄さ)。1 に近いほど細い輪郭に見える。
-_RING_INNER_RATIO = 0.78
-# 帯(線)の幅の半径比。
-_STRIP_WIDTH_RATIO = 0.16
-# 中心点(⊙)の塗り丸の半径比。
-_CENTER_DOT_RATIO = 0.24
-# 二重リング(◎)の内側リングの外径比。
-_INNER_RING_RATIO = 0.5
-# 十字(⊕)の帯が円周をわずかに越えて伸びる比率。
-_PLUS_EXTEND_RATIO = 1.18
+# 45° 方向の単位長(円周上の斜め点の座標係数)。
+_DIAG = math.sqrt(0.5)
 
 
-def _disk(radius: float) -> Profile:
-    return {'kind': KIND_DISK, 'center': [0.0, 0.0], 'radius': radius}
+def _line(x1: float, y1: float, x2: float, y2: float) -> Profile:
+    return {'kind': KIND_LINE, 'start': [x1, y1], 'end': [x2, y2]}
 
 
-def _ring(outer: float, inner: float) -> Profile:
-    return {'kind': KIND_RING, 'center': [0.0, 0.0], 'outer': outer, 'inner': inner}
+def _circle(radius: float, filled: bool) -> Profile:
+    return {
+        'kind': KIND_CIRCLE,
+        'center': [0.0, 0.0],
+        'radius': radius,
+        'filled': filled,
+    }
 
 
-def _strip(angle_deg: float, length: float, width: float) -> Profile:
-    """原点中心・指定角度の帯(長方形)を塗り多角形プロファイルにする。"""
-    theta = math.radians(angle_deg)
-    ax, ay = math.cos(theta), math.sin(theta)      # 帯の長さ方向
-    px, py = -math.sin(theta), math.cos(theta)     # 幅方向(直交)
-    hl, hw = length / 2.0, width / 2.0
-    corners = [
-        (ax * hl + px * hw, ay * hl + py * hw),
-        (ax * hl - px * hw, ay * hl - py * hw),
-        (-ax * hl - px * hw, -ay * hl - py * hw),
-        (-ax * hl + px * hw, -ay * hl + py * hw),
-    ]
-    return {'kind': KIND_POLYGON, 'points': [[x, y] for x, y in corners]}
-
-
-def _cross(r: float, reach: float) -> List[Profile]:
-    """斜め十字(× 帯 2 本)。reach は帯の半長(円周まで/箱の対角まで)。"""
-    w = r * _STRIP_WIDTH_RATIO
-    return [_strip(45.0, 2.0 * reach, w), _strip(-45.0, 2.0 * reach, w)]
-
-
-def _plus(r: float) -> List[Profile]:
-    """十字(縦横の帯 2 本)。円周をわずかに越えて伸びる。"""
-    w = r * _STRIP_WIDTH_RATIO
-    length = 2.0 * r * _PLUS_EXTEND_RATIO
-    return [_strip(0.0, length, w), _strip(90.0, length, w)]
-
-
-def _dot_sym(r: float) -> List[Profile]:
+def _dot(r: float) -> List[Profile]:
     """● 塗り丸。"""
-    return [_disk(r)]
+    return [_circle(r, True)]
 
 
 def _open_circle(r: float) -> List[Profile]:
-    """○ リング。"""
-    return [_ring(r, r * _RING_INNER_RATIO)]
+    """○ 円(輪郭)。"""
+    return [_circle(r, False)]
 
 
-def _cross_sym(r: float) -> List[Profile]:
-    """× 斜め十字(記号の外形いっぱい=箱の対角まで)。"""
-    return _cross(r, r * math.sqrt(2.0))
-
-
-def _circle_slash(r: float) -> List[Profile]:
-    """⊘ リング + 斜線 1 本。"""
-    w = r * _STRIP_WIDTH_RATIO
-    return [_ring(r, r * _RING_INNER_RATIO), _strip(45.0, 2.0 * r, w)]
-
-
-def _circle_dot(r: float) -> List[Profile]:
-    """⊙ リング + 中心の塗り丸。"""
-    return [_ring(r, r * _RING_INNER_RATIO), _disk(r * _CENTER_DOT_RATIO)]
-
-
-def _circle_cross(r: float) -> List[Profile]:
-    """⊗ リング + 内側の ×(円周まで)。"""
-    return [_ring(r, r * _RING_INNER_RATIO), *_cross(r, r)]
-
-
-def _double_circle(r: float) -> List[Profile]:
-    """◎ 二重リング。"""
-    inner_outer = r * _INNER_RING_RATIO
+def _cross(r: float) -> List[Profile]:
+    """× 斜め十字(記号の外形いっぱいに広がる)。"""
     return [
-        _ring(r, r * _RING_INNER_RATIO),
-        _ring(inner_outer, inner_outer * _RING_INNER_RATIO),
+        _line(-r, -r, r, r),
+        _line(-r, r, r, -r),
     ]
 
 
+def _inner_cross(r: float) -> List[Profile]:
+    """円の内側に収まる斜め十字(円周上まで)。"""
+    d = r * _DIAG
+    return [
+        _line(-d, -d, d, d),
+        _line(-d, d, d, -d),
+    ]
+
+
+def _plus(r: float) -> List[Profile]:
+    """十字線(縦横)。円周をわずかに越えて伸びる。"""
+    e = r * 1.2
+    return [
+        _line(-e, 0.0, e, 0.0),
+        _line(0.0, -e, 0.0, e),
+    ]
+
+
+def _circle_slash(r: float) -> List[Profile]:
+    """⊘ 円 + 斜線 1 本。"""
+    d = r * _DIAG
+    return [_circle(r, False), _line(-d, -d, d, d)]
+
+
+def _circle_dot(r: float) -> List[Profile]:
+    """⊙ 円 + 中心の塗り丸。"""
+    return [_circle(r, False), _circle(r * 0.22, True)]
+
+
+def _circle_cross(r: float) -> List[Profile]:
+    """⊗ 円 + 内側の ×。"""
+    return [_circle(r, False), *_inner_cross(r)]
+
+
+def _double_circle(r: float) -> List[Profile]:
+    """◎ 二重円。"""
+    return [_circle(r, False), _circle(r * 0.5, False)]
+
+
 def _circle_plus(r: float) -> List[Profile]:
-    """⊕ リング + 十字。"""
-    return [_ring(r, r * _RING_INNER_RATIO), *_plus(r)]
+    """⊕ 円 + 十字。"""
+    return [_circle(r, False), *_plus(r)]
 
 
 def _dot_plus(r: float) -> List[Profile]:
     """●⊕ 塗り丸 + 十字。"""
-    return [_disk(r * 0.55), *_plus(r)]
+    return [_circle(r * 0.6, True), *_plus(r)]
 
 
 # 呼び径 -> 記号の組み立て関数(引数は記号の半径 r = size/2)。
 _SYMBOL_BUILDERS: Dict[int, Callable[[float], List[Profile]]] = {
-    10: _dot_sym,
-    13: _cross_sym,
+    10: _dot,
+    13: _cross,
     16: _circle_slash,
-    19: _dot_sym,
+    19: _dot,
     22: _open_circle,
     25: _circle_dot,
     29: _circle_cross,
@@ -156,10 +142,10 @@ def _builder_for(nominal: int) -> Callable[[float], List[Profile]]:
 
 
 def build_symbol_profiles(nominal: int, size: float) -> List[Profile]:
-    """呼び径 ``nominal`` の断面表示記号を外径 ``size`` のプロファイルにする。
+    """呼び径 ``nominal`` の断面表示記号を外径 ``size`` の線画プロファイルにする。
 
-    プロファイルは断面(パスに直交する紙面)の原点(0, 0)を基準にした
-    塗り形状(disk / ring / polygon)のリスト。``size`` は記号の外径
-    (``呼び径 × MarkScale``)で、半径 ``r = size/2``。
+    プロファイルは断面(パスに直交する紙面)の原点(0, 0)を基準にした線・円の
+    リスト。``size`` は記号の外径(``呼び径 × MarkScale``)で、半径
+    ``r = size/2``。
     """
     return _builder_for(nominal)(size / 2.0)

@@ -7,7 +7,8 @@ import pytest
 
 from vectorworks_plugin_rebar_single.document import (
     DOCUMENT_VERSION,
-    KIND_POLYGON,
+    KIND_CIRCLE,
+    KIND_LINE,
     validate_document,
 )
 from vectorworks_plugin_rebar_single.rebar import SpecError, build_document
@@ -44,23 +45,39 @@ class TestBuildDocument:
             {'start': [500.0, 0.0], 'end': [500.0, 300.0]},
         ]
 
-    def test_d13_symbol_is_two_strips(self) -> None:
-        # D13 は × (帯 polygon 2 本)
+    def test_plan_center_is_xy_centroid(self) -> None:
+        doc = build_document(_params(path=[[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0]]))
+        assert doc['plan_center'] == [500.0, 0.0]
+
+    def test_vertical_bar_has_no_plan_line_but_has_symbol(self) -> None:
+        # 縦筋(XY が同一・Z のみ変化)は投影線が退化するので描かず、
+        # 平面には plan_center の 2D 記号で示す
+        doc = build_document(
+            _params(bar='D13', path=[[100.0, 200.0, 0.0], [100.0, 200.0, -400.0]])
+        )
+        assert doc['plan_lines'] == []
+        assert doc['plan_center'] == [100.0, 200.0]
+        assert doc['symbol_profiles']  # 記号は残る(平面・断面で使う)
+
+    def test_d13_symbol_is_two_lines(self) -> None:
+        # D13 は × (線 2 本)
         doc = build_document(_params(bar='D13'))
         profiles = doc['symbol_profiles']
-        assert all(p['kind'] == KIND_POLYGON for p in profiles)
+        assert all(p['kind'] == KIND_LINE for p in profiles)
         assert len(profiles) == 2
 
     def test_symbol_profiles_present(self) -> None:
+        # D22 は ○ (輪郭の円)
         doc = build_document(_params(bar='D22'))
         assert doc['symbol_profiles']  # 空でない
-        assert doc['symbol_profiles'][0]['kind'] == 'ring'
+        assert doc['symbol_profiles'][0]['kind'] == KIND_CIRCLE
+        assert doc['symbol_profiles'][0]['filled'] is False
 
     def test_mark_scale_affects_symbol_size(self) -> None:
         small = build_document(_params(bar='D22', mark_scale=2.0))
         large = build_document(_params(bar='D22', mark_scale=6.0))
-        small_r = small['symbol_profiles'][0]['outer']
-        large_r = large['symbol_profiles'][0]['outer']
+        small_r = small['symbol_profiles'][0]['radius']
+        large_r = large['symbol_profiles'][0]['radius']
         assert large_r == small_r * 3.0
 
     def test_empty_bar_raises(self) -> None:
@@ -81,8 +98,8 @@ class TestBuildDocument:
 
     def test_non_positive_mark_scale_falls_back(self) -> None:
         doc = build_document(_params(bar='D22', mark_scale=-1.0))
-        # 記号が正の外径で組み立つ(既定倍率へフォールバック)
-        assert doc['symbol_profiles'][0]['outer'] > 0
+        # 記号が正の半径で組み立つ(既定倍率へフォールバック)
+        assert doc['symbol_profiles'][0]['radius'] > 0
 
     def test_duplicate_points_collapsed(self) -> None:
         doc = build_document(
