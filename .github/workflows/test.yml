@@ -1,0 +1,62 @@
+name: Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+  code-quality: write
+  pull-requests: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # requires-python (>=3.9) の下限と新しめのバージョンで検証する
+        python-version: ["3.9", "3.11"]
+
+    steps:
+      # サプライチェーン対策: アクションはタグではなくコミット SHA で固定する
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test dependencies
+        run: pip install -e ".[test]"
+
+      - name: Download VectorWorks official vs.py stub
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/Vectorworks/developer-scripting/main/Python/pages/files/vs.py \
+            -o tests/vs.py
+          if [ ! -f tests/vs.py ]; then
+            echo "Failed to download vs.py"
+            exit 1
+          fi
+          echo "vs.py downloaded successfully"
+
+      - name: Run type check (mypy)
+        run: mypy
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v \
+            --cov=src/vectorworks_plugin_rebar_single \
+            --cov-report=xml:cobertura.xml
+
+      - name: Upload coverage report to GitHub Code Quality
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-code-coverage@a72ab75b4dee0e479386fb9bf33c8dcf64b9c772 # v1.4.0
+        with:
+          file: cobertura.xml
+          language: Python
+          label: code-coverage/pytest-cov
